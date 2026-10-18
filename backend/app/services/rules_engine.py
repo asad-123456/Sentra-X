@@ -1,0 +1,1 @@
+"""Deterministic guardrails: baseline severity, abstention, safety floors (FR-3)."""

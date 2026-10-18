@@ -1,0 +1,1 @@
+"""Gemini, Claude and mock LLM adapters plus retry logic (FR-2)."""

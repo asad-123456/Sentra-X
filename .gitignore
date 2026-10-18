@@ -72,3 +72,7 @@ desktop.ini
 *.njsproj
 *.sln
 
+
+.venv/
+.env
+__pycache__/

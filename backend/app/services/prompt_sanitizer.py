@@ -1,0 +1,1 @@
+"""Sanitizes untrusted log strings and flags injection attempts (FR-2)."""

@@ -1,0 +1,1 @@
+"""Adversarial benchmark and baseline comparison runner (FR-10)."""
