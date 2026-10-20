@@ -708,6 +708,368 @@ export const INITIAL_EVIDENCE_PACKS: Record<string, EvidencePack> = {
     injection_suspect: true,
     created_at: '2026-10-14T22:55:02Z',
   },
+  'al-9018': {
+    id: 'ep-9018',
+    alert_id: 'al-9018',
+    alert_metadata: {
+      wazuh_alert_id: '1728833900.401821',
+      timestamp: '2026-10-14T23:09:00Z',
+      rule: {
+        id: '55001',
+        level: 7,
+        description: 'Crontab Configuration File Modified by Local User',
+        mitre: {
+          tactics: ['Persistence'],
+          id: ['T1053.003'],
+        },
+      },
+    },
+    asset_context: {
+      agent_id: '004',
+      agent_name: 'WS-ENG-44',
+      criticality_tier: 'MEDIUM',
+    },
+    telemetry_payload: {
+      agent: {
+        id: '004',
+        name: 'WS-ENG-44',
+        ip: '10.0.8.44',
+      },
+      data: {
+        win: {
+          system: {
+            eventID: '4698',
+            channel: 'Security',
+            computer: 'WS-ENG-44.corp.sentrax.internal',
+          },
+          eventdata: {
+            TaskName: '\\LocalDev\\TestRunnerNightly',
+            User: 'CORP\\dev_user04',
+            CommandLine: 'crontab -e /tmp/scheduled_test_runner.sh',
+          },
+        },
+      },
+      full_log: 'Local schedule modified by dev_user04 for unit test automated trigger.',
+    },
+    temporal_context: [],
+    injected_exemplar_ids: [],
+    injection_suspect: false,
+    created_at: '2026-10-14T23:09:01Z',
+  },
+  'al-9017': {
+    id: 'ep-9017',
+    alert_id: 'al-9017',
+    alert_metadata: {
+      wazuh_alert_id: '1728833500.501982',
+      timestamp: '2026-10-14T23:02:00Z',
+      rule: {
+        id: '52002',
+        level: 6,
+        description: 'System File Permission Modification in /var/www',
+        mitre: {
+          tactics: ['Defense Evasion'],
+          id: ['T1222.002'],
+        },
+      },
+    },
+    asset_context: {
+      agent_id: '005',
+      agent_name: 'DMZ-WEB-01',
+      criticality_tier: 'LOW',
+    },
+    telemetry_payload: {
+      agent: {
+        id: '005',
+        name: 'DMZ-WEB-01',
+        ip: '172.16.1.10',
+      },
+      data: {
+        command: 'chmod 755 /var/www/html/index.php',
+        user: 'deploy_service',
+        process: 'deployment_runner',
+      },
+      full_log: 'chmod 755 applied to web root following automated CI/CD static asset synchronization.',
+    },
+    temporal_context: [],
+    injected_exemplar_ids: [],
+    injection_suspect: false,
+    created_at: '2026-10-14T23:02:01Z',
+  },
+  'al-9015': {
+    id: 'ep-9015',
+    alert_id: 'al-9015',
+    alert_metadata: {
+      wazuh_alert_id: '1728832800.701192',
+      timestamp: '2026-10-14T22:50:00Z',
+      rule: {
+        id: '92110',
+        level: 9,
+        description: 'Kernel Module Ingestion Attempt — Automated LLM Triage Exhausted',
+        mitre: {
+          tactics: ['Persistence', 'Privilege Escalation'],
+          id: ['T1547.006'],
+        },
+      },
+    },
+    asset_context: {
+      agent_id: '003',
+      agent_name: 'APP-SRV-04',
+      criticality_tier: 'HIGH',
+    },
+    telemetry_payload: {
+      agent: {
+        id: '003',
+        name: 'APP-SRV-04',
+        ip: '10.0.3.15',
+      },
+      data: {
+        command: 'insmod /opt/kernel/custom_drv.ko',
+        user: 'root',
+        module_hash_sha256: '9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08',
+      },
+      full_log: 'insmod executed with unsigned driver module custom_drv.ko on application gateway node.',
+    },
+    temporal_context: [],
+    injected_exemplar_ids: [],
+    injection_suspect: false,
+    created_at: '2026-10-14T22:50:01Z',
+  },
+  'al-9013': {
+    id: 'ep-9013',
+    alert_id: 'al-9013',
+    alert_metadata: {
+      wazuh_alert_id: '1728832000.901844',
+      timestamp: '2026-10-14T22:35:00Z',
+      rule: {
+        id: '100400',
+        level: 14,
+        description: 'Ransomware Mass Canary File Extension Modification Detected',
+        mitre: {
+          tactics: ['Impact'],
+          id: ['T1486'],
+        },
+      },
+    },
+    asset_context: {
+      agent_id: '001',
+      agent_name: 'CORP-DC-01',
+      criticality_tier: 'CRITICAL',
+    },
+    telemetry_payload: {
+      agent: {
+        id: '001',
+        name: 'CORP-DC-01',
+        ip: '10.0.1.5',
+      },
+      data: {
+        win: {
+          system: {
+            eventID: '1',
+            channel: 'Microsoft-Windows-Sysmon/Operational',
+            computer: 'CORP-DC-01.corp.sentrax.internal',
+          },
+          eventdata: {
+            CommandLine: 'vssadmin.exe delete shadows /all /quiet',
+            Image: 'C:\\Windows\\System32\\vssadmin.exe',
+            ParentCommandLine: 'cmd.exe /c start vssadmin delete shadows /all /quiet',
+            User: 'NT AUTHORITY\\SYSTEM',
+          },
+        },
+      },
+      full_log: 'Volume shadow copies purged via vssadmin command. Immediate ransomware encryption indicator.',
+    },
+    temporal_context: [],
+    injected_exemplar_ids: [],
+    injection_suspect: false,
+    created_at: '2026-10-14T22:35:01Z',
+  },
+  'al-9012': {
+    id: 'ep-9012',
+    alert_id: 'al-9012',
+    alert_metadata: {
+      wazuh_alert_id: '1728831600.102394',
+      timestamp: '2026-10-14T22:28:00Z',
+      rule: {
+        id: '70200',
+        level: 8,
+        description: 'Kerberoasting High-Volume SPN Service Ticket Request Burst',
+        mitre: {
+          tactics: ['Credential Access'],
+          id: ['T1558.003'],
+        },
+      },
+    },
+    asset_context: {
+      agent_id: '001',
+      agent_name: 'CORP-DC-01',
+      criticality_tier: 'CRITICAL',
+    },
+    telemetry_payload: {
+      agent: {
+        id: '001',
+        name: 'CORP-DC-01',
+        ip: '10.0.1.5',
+      },
+      data: {
+        win: {
+          system: {
+            eventID: '4769',
+            channel: 'Security',
+            computer: 'CORP-DC-01.corp.sentrax.internal',
+          },
+          eventdata: {
+            ServiceName: 'MSSQLSvc/sql-prod-02.corp.sentrax.internal:1433',
+            TicketEncryptionType: '0x17 (RC4-HMAC)',
+            TicketOptions: '0x40810000',
+            TargetUserName: 'svc_mssql@corp.sentrax.internal',
+            CommandLine: 'Rubeus.exe kerberoast /outfile:tickets.txt',
+          },
+        },
+      },
+      full_log: 'Kerberos service ticket request burst using RC4 encryption against high-privilege SQL service account.',
+    },
+    temporal_context: [],
+    injected_exemplar_ids: [],
+    injection_suspect: false,
+    created_at: '2026-10-14T22:28:01Z',
+  },
+  'al-9011': {
+    id: 'ep-9011',
+    alert_id: 'al-9011',
+    alert_metadata: {
+      wazuh_alert_id: '1728831200.201831',
+      timestamp: '2026-10-14T22:20:00Z',
+      rule: {
+        id: '53001',
+        level: 5,
+        description: 'Unusual Outbound ICMP Tunneling Traffic Detected',
+        mitre: {
+          tactics: ['Command and Control', 'Exfiltration'],
+          id: ['T1095'],
+        },
+      },
+    },
+    asset_context: {
+      agent_id: '005',
+      agent_name: 'DMZ-WEB-01',
+      criticality_tier: 'LOW',
+    },
+    telemetry_payload: {
+      agent: {
+        id: '005',
+        name: 'DMZ-WEB-01',
+        ip: '172.16.1.10',
+      },
+      data: {
+        srcip: '172.16.1.10',
+        dstip: '203.0.113.88',
+        proto: 'ICMP',
+        packet_size: 1024,
+        icmp_code: '0',
+        icmp_type: '8',
+      },
+      full_log: 'ICMP ping echo request with 1024 byte payload validated as diagnostic probe RFC-4412.',
+    },
+    temporal_context: [],
+    injected_exemplar_ids: [],
+    injection_suspect: false,
+    created_at: '2026-10-14T22:20:01Z',
+  },
+  'al-9010': {
+    id: 'ep-9010',
+    alert_id: 'al-9010',
+    alert_metadata: {
+      wazuh_alert_id: '1728830800.301981',
+      timestamp: '2026-10-14T22:12:00Z',
+      rule: {
+        id: '100320',
+        level: 12,
+        description: 'Remote WMI Process Invocation via Impacket WMIExec',
+        mitre: {
+          tactics: ['Execution', 'Lateral Movement'],
+          id: ['T1047'],
+        },
+      },
+    },
+    asset_context: {
+      agent_id: '003',
+      agent_name: 'APP-SRV-04',
+      criticality_tier: 'HIGH',
+    },
+    telemetry_payload: {
+      agent: {
+        id: '003',
+        name: 'APP-SRV-04',
+        ip: '10.0.3.15',
+      },
+      data: {
+        win: {
+          system: {
+            eventID: '1',
+            channel: 'Microsoft-Windows-Sysmon/Operational',
+            computer: 'APP-SRV-04.corp.sentrax.internal',
+          },
+          eventdata: {
+            CommandLine: 'wmiprvse.exe -> cmd.exe /Q /c whoami > \\\\127.0.0.1\\ADMIN$\\__output 2>&1',
+            ParentProcessName: 'WmiPrvSE.exe',
+            User: 'CORP\\contractor_temp',
+          },
+        },
+      },
+      full_log: 'Remote WMI process invocation spawned interactive cmd.exe shell via unprivileged contractor credential.',
+    },
+    temporal_context: [],
+    injected_exemplar_ids: [],
+    injection_suspect: false,
+    created_at: '2026-10-14T22:12:01Z',
+  },
+  'al-8701': {
+    id: 'ep-8701',
+    alert_id: 'al-8701',
+    alert_metadata: {
+      wazuh_alert_id: '1728720000.401923',
+      timestamp: '2026-10-12T15:00:00Z',
+      rule: {
+        id: '87105',
+        level: 10,
+        description: 'PowerShell Encoded Command Routine Scheduled Maintenance',
+        mitre: {
+          tactics: ['Execution'],
+          id: ['T1059.001'],
+        },
+      },
+    },
+    asset_context: {
+      agent_id: '002',
+      agent_name: 'SQL-PROD-02',
+      criticality_tier: 'CRITICAL',
+    },
+    telemetry_payload: {
+      agent: {
+        id: '002',
+        name: 'SQL-PROD-02',
+        ip: '10.0.2.10',
+      },
+      data: {
+        win: {
+          system: {
+            eventID: '4104',
+            channel: 'Microsoft-Windows-PowerShell/Operational',
+            computer: 'SQL-PROD-02.corp.sentrax.internal',
+          },
+          eventdata: {
+            CommandLine: 'powershell.exe -File Maintenance.ps1 -TargetDatabase CustomerTransactions',
+            User: 'NT SERVICE\\SQLSERVERAGENT',
+          },
+        },
+      },
+      full_log: 'Routine SQL index defragmentation script executed by official SQLSERVERAGENT service account.',
+    },
+    temporal_context: [],
+    injected_exemplar_ids: ['EX-104'],
+    injection_suspect: false,
+    created_at: '2026-10-12T15:00:01Z',
+  },
 };
 
 // ---------------------------------------------------------------------------
@@ -852,6 +1214,29 @@ export const INITIAL_ASSESSMENTS: Record<string, AIAssessment> = {
     latency_ms: 2280,
     retry_count: 0,
     created_at: '2026-10-14T22:55:04Z',
+  },
+  'al-9015': {
+    id: 'ai-9015',
+    alert_id: 'al-9015',
+    evidence_pack_id: 'ep-9015',
+    raw_verdict: 'NEEDS_ANALYST_REVIEW',
+    raw_severity: 'HIGH',
+    effective_verdict: 'NEEDS_ANALYST_REVIEW',
+    effective_severity: 'HIGH',
+    confidence_score: 0.45,
+    cited_evidence_keys: [
+      'telemetry_payload.data.command',
+      'telemetry_payload.data.module_hash_sha256',
+    ],
+    explanation: 'Automated AI triage retry budget exhausted (3 attempts timed out or returned low confidence). Routed to Tier 2 security analyst for manual investigation and driver disassembly verification.',
+    safety_floor_triggered: false,
+    abstention_triggered: true,
+    guardrail_audit_note: 'Retry Budget Exhausted (retry_count=3): Inconclusive kernel module analysis; escalated to NEEDS_MANUAL_TRIAGE queue per SRS Section 3.6.',
+    llm_provider: 'Gemini',
+    model_name: 'gemini-2.5-flash',
+    latency_ms: 3100,
+    retry_count: 3,
+    created_at: '2026-10-14T22:50:03Z',
   },
   'al-9013': {
     id: 'ai-9013',

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Play,
   Download,
@@ -7,6 +7,7 @@ import {
   Sliders,
   FileCode,
   FileText,
+  FileSpreadsheet,
   AlertCircle,
   Loader2,
 } from 'lucide-react';
@@ -19,6 +20,7 @@ import type {
 } from '../types/sentrax';
 import {
   getBenchmarkSuite,
+  getBenchmarkReport,
   runBenchmarkEvaluation,
   getSystemConfig,
   updateSystemConfig,
@@ -51,13 +53,31 @@ export const EvaluationRunnerView: React.FC = () => {
   const [loadingConfig, setLoadingConfig] = useState(true);
 
   const [error, setError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
   const [showExportMenu, setShowExportMenu] = useState(false);
+  const exportMenuRef = useRef<HTMLDivElement>(null);
+
+  // Close export menu when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (exportMenuRef.current && !exportMenuRef.current.contains(event.target as Node)) {
+        setShowExportMenu(false);
+      }
+    };
+
+    if (showExportMenu) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [showExportMenu]);
 
   // Load benchmark initial data
   const loadBenchmarkData = () => {
     setLoadingBenchmark(true);
     setError(null);
-    Promise.all([runBenchmarkEvaluation('SENTRAX_FULL'), getBenchmarkSuite()])
+    Promise.all([getBenchmarkReport(), getBenchmarkSuite()])
       .then(([reportData, suiteData]) => {
         setReport(reportData);
         setPayloads(suiteData);
@@ -88,7 +108,7 @@ export const EvaluationRunnerView: React.FC = () => {
 
   useEffect(() => {
     let isCancelled = false;
-    Promise.all([runBenchmarkEvaluation('SENTRAX_FULL'), getBenchmarkSuite()])
+    Promise.all([getBenchmarkReport(), getBenchmarkSuite()])
       .then(([reportData, suiteData]) => {
         if (!isCancelled) {
           setReport(reportData);
@@ -127,13 +147,14 @@ export const EvaluationRunnerView: React.FC = () => {
 
   const handleRunBenchmark = async () => {
     setRunningBenchmark(true);
+    setActionError(null);
     try {
       const updatedReport = await runBenchmarkEvaluation('SENTRAX_FULL');
       setReport(updatedReport);
       setPayloads(updatedReport.adversarial_suite);
     } catch (err) {
       console.error('Failed to run benchmark:', err);
-      alert('Benchmark evaluation run failed.');
+      setActionError(err instanceof Error ? err.message : 'Benchmark evaluation run failed.');
     } finally {
       setRunningBenchmark(false);
     }
@@ -150,22 +171,24 @@ export const EvaluationRunnerView: React.FC = () => {
   };
 
   const handleUpdateRole = async (userId: string, role: UserRole) => {
+    setActionError(null);
     try {
       const updated = await updateUserRole(userId, role);
       setUsers((prev) => prev.map((u) => (u.id === updated.id ? updated : u)));
     } catch (err) {
       console.error('Failed to update role:', err);
-      alert('Failed to update user role.');
+      setActionError(err instanceof Error ? err.message : 'Failed to update user role.');
     }
   };
 
   const handleToggleActive = async (userId: string, isActive: boolean) => {
+    setActionError(null);
     try {
       const updated = await toggleUserActive(userId, isActive);
       setUsers((prev) => prev.map((u) => (u.id === updated.id ? updated : u)));
     } catch (err) {
       console.error('Failed to toggle active status:', err);
-      alert('Failed to toggle user status.');
+      setActionError(err instanceof Error ? err.message : 'Failed to toggle user status.');
     }
   };
 
@@ -199,6 +222,43 @@ export const EvaluationRunnerView: React.FC = () => {
     const a = document.createElement('a');
     a.href = url;
     a.download = `sentrax_adversarial_evaluation_${new Date().toISOString().slice(0, 10)}.md`;
+    a.click();
+    URL.revokeObjectURL(url);
+    setShowExportMenu(false);
+  };
+
+  const handleExportCSV = () => {
+    if (!report) return;
+    const rows = [
+      ['Metric Name', 'Baseline Raw LLM Value', 'Sentra-X Value', 'Research Delta', 'NFR-3 Target Met'],
+      ...report.comparative_metrics.map((m) => [
+        `"${m.metric_name.replace(/"/g, '""')}"`,
+        `"${m.baseline_value.replace(/"/g, '""')}"`,
+        `"${m.sentrax_value.replace(/"/g, '""')}"`,
+        `"${m.research_delta.replace(/"/g, '""')}"`,
+        m.is_target_met ? 'YES' : 'NO',
+      ]),
+      [],
+      ['Payload ID', 'Category', 'Target Field', 'Adversarial Payload', 'Baseline Verdict', 'Baseline Bypassed', 'Sentra-X Verdict', 'Sentra-X Bypassed', 'Defense Mechanism'],
+      ...report.adversarial_suite.map((p) => [
+        p.id,
+        `"${p.category.replace(/"/g, '""')}"`,
+        `"${p.target_field.replace(/"/g, '""')}"`,
+        `"${p.payload.replace(/"/g, '""')}"`,
+        `"${p.baseline_verdict.replace(/"/g, '""')}"`,
+        p.baseline_bypassed ? 'YES' : 'NO',
+        `"${p.sentrax_verdict.replace(/"/g, '""')}"`,
+        p.sentrax_bypassed ? 'YES' : 'NO',
+        `"${p.defense_mechanism.replace(/"/g, '""')}"`,
+      ]),
+    ];
+
+    const csvContent = rows.map((r) => r.join(',')).join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `sentrax_adversarial_evaluation_${new Date().toISOString().slice(0, 10)}.csv`;
     a.click();
     URL.revokeObjectURL(url);
     setShowExportMenu(false);
@@ -240,11 +300,11 @@ export const EvaluationRunnerView: React.FC = () => {
           </button>
 
           {/* Export Report Dropdown */}
-          <div className="relative">
+          <div ref={exportMenuRef} className="relative">
             <button
               type="button"
               onClick={() => setShowExportMenu(!showExportMenu)}
-              className="px-3.5 py-2 rounded-lg bg-zinc-900 border border-zinc-800 text-xs font-mono text-zinc-200 hover:text-zinc-50 hover:bg-zinc-800 transition-colors flex items-center gap-1.5"
+              className="px-3.5 py-2 rounded-lg bg-zinc-900 border border-zinc-800 text-xs font-mono text-zinc-200 hover:text-zinc-50 hover:bg-zinc-800 transition-colors flex items-center gap-1.5 cursor-pointer"
             >
               <Download className="size-3.5" />
               <span>Export Report</span>
@@ -254,8 +314,16 @@ export const EvaluationRunnerView: React.FC = () => {
               <div className="absolute right-0 mt-2 w-48 rounded-xl bg-zinc-950 border border-zinc-800 shadow-xl py-1 z-50 animate-in fade-in zoom-in-95">
                 <button
                   type="button"
+                  onClick={handleExportCSV}
+                  className="w-full px-3 py-2 text-left text-xs font-mono text-zinc-300 hover:text-zinc-100 hover:bg-zinc-900 flex items-center gap-2 cursor-pointer"
+                >
+                  <FileSpreadsheet className="size-3.5 text-zinc-400" />
+                  CSV Metrics (.csv)
+                </button>
+                <button
+                  type="button"
                   onClick={handleExportJSON}
-                  className="w-full px-3 py-2 text-left text-xs font-mono text-zinc-300 hover:text-zinc-100 hover:bg-zinc-900 flex items-center gap-2"
+                  className="w-full px-3 py-2 text-left text-xs font-mono text-zinc-300 hover:text-zinc-100 hover:bg-zinc-900 flex items-center gap-2 cursor-pointer"
                 >
                   <FileCode className="size-3.5 text-zinc-400" />
                   JSON Dataset (.json)
@@ -263,7 +331,7 @@ export const EvaluationRunnerView: React.FC = () => {
                 <button
                   type="button"
                   onClick={handleExportMarkdown}
-                  className="w-full px-3 py-2 text-left text-xs font-mono text-zinc-300 hover:text-zinc-100 hover:bg-zinc-900 flex items-center gap-2"
+                  className="w-full px-3 py-2 text-left text-xs font-mono text-zinc-300 hover:text-zinc-100 hover:bg-zinc-900 flex items-center gap-2 cursor-pointer"
                 >
                   <FileText className="size-3.5 text-zinc-400" />
                   Markdown Report (.md)
@@ -273,6 +341,23 @@ export const EvaluationRunnerView: React.FC = () => {
           </div>
         </div>
       </div>
+
+      {/* Action Error Banner */}
+      {actionError && (
+        <div className="p-3 rounded-xl bg-red-950/40 border border-red-800/60 text-xs font-mono text-red-300 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <AlertCircle className="size-4 shrink-0 text-red-400" />
+            <span>{actionError}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setActionError(null)}
+            className="px-2.5 py-1 rounded bg-zinc-900 border border-zinc-750 text-zinc-300 hover:text-zinc-100 text-[11px]"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
 
       {/* Global Error Banner */}
       {error && (

@@ -29,13 +29,15 @@ export const GovernanceView: React.FC = () => {
   const [assets, setAssets] = useState<Asset[]>([]);
   const [loadingAssets, setLoadingAssets] = useState(true);
 
-  const [error, setError] = useState<string | null>(null);
+  const [exemplarError, setExemplarError] = useState<string | null>(null);
+  const [assetError, setAssetError] = useState<string | null>(null);
 
   // Load data function for manual retry / refresh
   const reloadData = () => {
     setLoadingExemplars(true);
     setLoadingAssets(true);
-    setError(null);
+    setExemplarError(null);
+    setAssetError(null);
     getExemplars()
       .then((data) => {
         setExemplars(data);
@@ -43,7 +45,7 @@ export const GovernanceView: React.FC = () => {
       })
       .catch((err: unknown) => {
         const msg = err instanceof Error ? err.message : 'Failed to fetch exemplars.';
-        setError(msg);
+        setExemplarError(msg);
         setLoadingExemplars(false);
       });
 
@@ -54,13 +56,14 @@ export const GovernanceView: React.FC = () => {
       })
       .catch((err: unknown) => {
         const msg = err instanceof Error ? err.message : 'Failed to fetch monitored assets.';
-        setError(msg);
+        setAssetError(msg);
         setLoadingAssets(false);
       });
   };
 
   useEffect(() => {
     let isCancelled = false;
+
     getExemplars()
       .then((data) => {
         if (!isCancelled) {
@@ -71,7 +74,7 @@ export const GovernanceView: React.FC = () => {
       .catch((err: unknown) => {
         if (!isCancelled) {
           const msg = err instanceof Error ? err.message : 'Failed to fetch exemplars.';
-          setError(msg);
+          setExemplarError(msg);
           setLoadingExemplars(false);
         }
       });
@@ -86,7 +89,7 @@ export const GovernanceView: React.FC = () => {
       .catch((err: unknown) => {
         if (!isCancelled) {
           const msg = err instanceof Error ? err.message : 'Failed to fetch monitored assets.';
-          setError(msg);
+          setAssetError(msg);
           setLoadingAssets(false);
         }
       });
@@ -96,8 +99,8 @@ export const GovernanceView: React.FC = () => {
     };
   }, []);
 
-
   const handleToggleExemplarActive = async (id: string, active: boolean) => {
+    setExemplarError(null);
     try {
       const updated = await toggleExemplarActive(id, active);
       setExemplars((prev) =>
@@ -105,7 +108,7 @@ export const GovernanceView: React.FC = () => {
       );
     } catch (err) {
       console.error('Failed to toggle exemplar active state:', err);
-      alert('Failed to update exemplar status.');
+      setExemplarError(err instanceof Error ? err.message : 'Failed to update exemplar status.');
     }
   };
 
@@ -204,19 +207,31 @@ export const GovernanceView: React.FC = () => {
       </div>
 
       {/* Error Banner */}
-      {error && (
+      {(activeTab === 'exemplars' ? exemplarError : assetError) && (
         <div className="p-4 rounded-xl bg-red-950/40 border border-red-800/80 text-red-200 text-xs font-mono flex items-center justify-between gap-3">
           <div className="flex items-center gap-2">
             <AlertCircle className="size-4 text-red-400 shrink-0" />
-            <span>{error}</span>
+            <span>{activeTab === 'exemplars' ? exemplarError : assetError}</span>
           </div>
-          <button
-            type="button"
-            onClick={handleRefresh}
-            className="px-3 py-1 rounded bg-red-900/60 border border-red-700 text-xs text-red-200 hover:bg-red-800 transition-colors"
-          >
-            Retry
-          </button>
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={() => {
+                if (activeTab === 'exemplars') setExemplarError(null);
+                else setAssetError(null);
+              }}
+              className="px-2.5 py-1 rounded bg-zinc-900 border border-zinc-750 text-xs text-zinc-300 hover:text-zinc-100 transition-colors"
+            >
+              Dismiss
+            </button>
+            <button
+              type="button"
+              onClick={handleRefresh}
+              className="px-3 py-1 rounded bg-red-900/60 border border-red-700 text-xs text-red-200 hover:bg-red-800 transition-colors"
+            >
+              Retry
+            </button>
+          </div>
         </div>
       )}
 

@@ -73,7 +73,7 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
                       onClick={() => switchDemoRole('Admin')}
                       className="px-2.5 py-1 rounded bg-zinc-900 border border-zinc-700 hover:border-zinc-500 text-zinc-200 text-xs font-mono transition-colors"
                     >
-                      Super Admin
+                      Admin
                     </button>
                   )}
                 </div>

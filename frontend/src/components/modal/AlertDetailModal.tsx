@@ -34,6 +34,7 @@ export const AlertDetailModal: React.FC<AlertDetailModalProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [selectedCitationKey, setSelectedCitationKey] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!isOpen || !alertId) return;
@@ -45,6 +46,7 @@ export const AlertDetailModal: React.FC<AlertDetailModalProps> = ({
         if (!isCancelled) {
           setDetail(data);
           setSelectedCitationKey(null);
+          setSubmitError(null);
           setIsLoading(false);
         }
       })
@@ -83,7 +85,7 @@ export const AlertDetailModal: React.FC<AlertDetailModalProps> = ({
         payload.action === 'ESCALATE'
           ? 'ESCALATED'
           : payload.action === 'RETRY_AI'
-          ? 'AWAITING_ANALYST'
+          ? 'PENDING_REVIEW'
           : 'CLOSED';
       onDecisionCommitted(
         `Action "${payload.action}" committed successfully (Audit #${audit.id.slice(-6)}). Alert transitioned to ${targetState}.`
@@ -94,7 +96,7 @@ export const AlertDetailModal: React.FC<AlertDetailModalProps> = ({
     } catch (err: unknown) {
       console.error('Error submitting decision:', err);
       const message = err instanceof Error ? err.message : 'Failed to submit decision.';
-      alert(message);
+      setSubmitError(message);
     } finally {
       setIsSubmitting(false);
     }
@@ -174,6 +176,9 @@ export const AlertDetailModal: React.FC<AlertDetailModalProps> = ({
                   {/* Host Context */}
                   <div className="flex items-center gap-2">
                     <span className="text-zinc-200 font-semibold">{detail.alert.agent_name}</span>
+                    <span className="px-1.5 py-0.5 rounded bg-zinc-900 border border-zinc-800 text-zinc-400 text-[10px] font-mono">
+                      #{detail.alert.agent_id}
+                    </span>
                     <span className="text-zinc-500">({detail.alert.src_ip || 'Internal'})</span>
                     <AssetTierBadge tier={detail.evidence_pack.asset_context.criticality_tier} />
                   </div>
@@ -217,6 +222,24 @@ export const AlertDetailModal: React.FC<AlertDetailModalProps> = ({
                 selectedCitationKey={selectedCitationKey}
               />
             </div>
+
+            {/* Inline Submission Error Banner */}
+            {submitError && (
+              <div className="mx-5 mb-2 p-3 rounded-lg bg-red-950/70 border border-red-800 text-red-200 text-xs font-mono flex items-center justify-between gap-2 shadow-lg shrink-0">
+                <div className="flex items-center gap-2">
+                  <AlertCircle className="size-4 text-red-400 shrink-0" />
+                  <span>{submitError}</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setSubmitError(null)}
+                  className="text-red-400 hover:text-red-200 p-0.5"
+                  title="Dismiss error"
+                >
+                  <X className="size-3.5" />
+                </button>
+              </div>
+            )}
 
             {/* Sticky Action Footer */}
             <DecisionActionPanel

@@ -25,18 +25,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [user, setUser] = useState<User | null>(() => {
     try {
       const storedUser = localStorage.getItem(USER_KEY);
-      if (storedUser) return JSON.parse(storedUser);
+      const storedToken = localStorage.getItem(TOKEN_KEY);
+      if (storedUser && storedToken) {
+        return JSON.parse(storedUser);
+      }
     } catch {
       // Fallback if parsing fails
     }
-    const defaultUser = DEMO_USERS[0];
-    localStorage.setItem(TOKEN_KEY, 'mock-jwt-analyst-session');
-    localStorage.setItem(USER_KEY, JSON.stringify(defaultUser));
-    return defaultUser;
+    return null;
   });
 
   const [token, setToken] = useState<string | null>(() => {
-    return localStorage.getItem(TOKEN_KEY) || 'mock-jwt-analyst-session';
+    const storedUser = localStorage.getItem(USER_KEY);
+    const storedToken = localStorage.getItem(TOKEN_KEY);
+    return storedUser && storedToken ? storedToken : null;
   });
 
   const [isLoading, setIsLoading] = useState<boolean>(false);

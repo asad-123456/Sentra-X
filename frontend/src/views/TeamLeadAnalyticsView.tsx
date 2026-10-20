@@ -22,10 +22,12 @@ export const TeamLeadAnalyticsView: React.FC = () => {
   const [isExporting, setIsExporting] = useState<boolean>(false);
   const [exportSuccess, setExportSuccess] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
+  const [exportError, setExportError] = useState<string | null>(null);
 
   const handleRefresh = () => {
     setIsLoading(true);
     setError(null);
+    setExportError(null);
     getAnalytics(dateRange, selectedRuleId)
       .then((data) => {
         setAnalytics(data);
@@ -63,6 +65,7 @@ export const TeamLeadAnalyticsView: React.FC = () => {
 
   const handleExport = async () => {
     setIsExporting(true);
+    setExportError(null);
     try {
       const csvData = await exportAuditCsv();
       const blob = new Blob([csvData], { type: 'text/csv;charset=utf-8;' });
@@ -80,7 +83,7 @@ export const TeamLeadAnalyticsView: React.FC = () => {
       setTimeout(() => setExportSuccess(false), 3000);
     } catch (err) {
       console.error('CSV Export failed:', err);
-      alert('Failed to generate audit CSV export.');
+      setExportError(err instanceof Error ? err.message : 'Failed to generate audit CSV export.');
     } finally {
       setIsExporting(false);
     }
@@ -184,7 +187,23 @@ export const TeamLeadAnalyticsView: React.FC = () => {
         </div>
       </div>
 
-      {/* Error Banner */}
+      {/* Error Banners */}
+      {exportError && (
+        <div className="p-4 rounded-xl bg-red-950/40 border border-red-800/80 text-red-200 text-xs font-mono flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <AlertCircle className="size-4 text-red-400 shrink-0" />
+            <span>{exportError}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setExportError(null)}
+            className="px-2.5 py-1 rounded bg-zinc-900 border border-zinc-750 text-xs text-zinc-300 hover:text-zinc-100 transition-colors"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
+
       {error && (
         <div className="p-4 rounded-xl bg-red-950/40 border border-red-800/80 text-red-200 text-xs font-mono flex items-center justify-between gap-3">
           <div className="flex items-center gap-2">

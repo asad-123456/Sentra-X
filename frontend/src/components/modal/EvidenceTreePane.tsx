@@ -19,6 +19,25 @@ interface EvidenceTreePaneProps {
 
 type EvidenceTab = 'tree' | 'raw_json' | 'prompt_envelope';
 
+// Dot-notation & bracket-index key resolver matching backend/app/services/evidence_assembler.py
+const TOKEN = /([^.\[\]]+)|\[(\d+)\]/g;
+
+export function resolveKey(pack: unknown, key: string): unknown | undefined {
+  let cur: any = pack;
+  for (const m of key.matchAll(TOKEN)) {
+    const [, name, index] = m;
+    if (name !== undefined) {
+      if (cur === null || typeof cur !== 'object' || Array.isArray(cur) || !(name in cur)) return undefined;
+      cur = cur[name];
+    } else {
+      const i = Number(index);
+      if (!Array.isArray(cur) || i >= cur.length) return undefined;
+      cur = cur[i];
+    }
+  }
+  return cur;
+}
+
 export const EvidenceTreePane: React.FC<EvidenceTreePaneProps> = ({
   evidencePack,
   citedEvidenceKeys,
@@ -88,21 +107,28 @@ export const EvidenceTreePane: React.FC<EvidenceTreePaneProps> = ({
     }
   };
 
-  // Recursive Tree Node Renderer with Dot-Notation Key Matching
+  // Recursive Tree Node Renderer supporting dot-notation, list leaves, and bracket indexes
   const renderTreeNode = (key: string, value: unknown, currentPath: string, depth = 0) => {
+    const isArray = Array.isArray(value);
     const isObject = value !== null && typeof value === 'object';
+    const isArrayOfPrimitives =
+      isArray && value.every((v) => v === null || typeof v !== 'object');
+    const isContainer = isObject && !isArrayOfPrimitives;
+
     const isCited = citedEvidenceKeys.some(
       (k) =>
         k === currentPath ||
-        k.endsWith(currentPath) ||
-        currentPath.endsWith(k) ||
-        k.startsWith(currentPath + '.')
+        k.startsWith(currentPath + '.') ||
+        k.startsWith(currentPath + '[')
     );
     const isSelected = selectedCitationKey === currentPath;
     const isCollapsed = Boolean(collapsedNodes[currentPath]);
 
-    if (isObject) {
-      const keys = Object.keys(value as Record<string, unknown>);
+    if (isContainer) {
+      const keys = isArray
+        ? Array.from({ length: value.length }, (_, i) => i)
+        : Object.keys(value as Record<string, unknown>);
+
       return (
         <div key={currentPath} className="space-y-1">
           <div
@@ -117,7 +143,6 @@ export const EvidenceTreePane: React.FC<EvidenceTreePaneProps> = ({
             }`}
             style={{ marginLeft: `${depth * 14}px` }}
           >
-
             {isCollapsed ? (
               <ChevronRight className="size-3.5 text-zinc-500 shrink-0" />
             ) : (
@@ -138,21 +163,30 @@ export const EvidenceTreePane: React.FC<EvidenceTreePaneProps> = ({
 
           {!isCollapsed && (
             <div className="space-y-1">
-              {keys.map((subKey) =>
-                renderTreeNode(
-                  subKey,
-                  (value as Record<string, unknown>)[subKey],
-                  `${currentPath}.${subKey}`,
-                  depth + 1
-                )
-              )}
+              {isArray
+                ? (value as unknown[]).map((subVal, idx) =>
+                    renderTreeNode(
+                      `[${idx}]`,
+                      subVal,
+                      `${currentPath}[${idx}]`,
+                      depth + 1
+                    )
+                  )
+                : (keys as string[]).map((subKey) =>
+                    renderTreeNode(
+                      subKey,
+                      (value as Record<string, unknown>)[subKey],
+                      `${currentPath}.${subKey}`,
+                      depth + 1
+                    )
+                  )}
             </div>
           )}
         </div>
       );
     }
 
-    // Leaf Value Node
+    // Leaf Value Node (handles primitives and lists of plain values as single citable leaf)
     return (
       <div
         key={currentPath}
@@ -169,7 +203,9 @@ export const EvidenceTreePane: React.FC<EvidenceTreePaneProps> = ({
         <div className="flex items-center gap-2 min-w-0">
           <span className="text-zinc-400 font-medium shrink-0">{key}:</span>
           <span className="text-zinc-100 break-all select-all font-mono">
-            {typeof value === 'boolean'
+            {isArrayOfPrimitives
+              ? JSON.stringify(value)
+              : typeof value === 'boolean'
               ? String(value)
               : typeof value === 'string'
               ? `"${value}"`

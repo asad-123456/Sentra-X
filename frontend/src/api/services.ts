@@ -56,6 +56,7 @@ const storeAnalytics: AnalyticsSummary = JSON.parse(JSON.stringify(INITIAL_ANALY
 const storeUsers: User[] = JSON.parse(JSON.stringify(DEMO_USERS));
 let storeSystemConfig: SystemConfig = JSON.parse(JSON.stringify(INITIAL_SYSTEM_CONFIG));
 let storeTotalOverrides = 24;
+let storeTotalAgreements = Math.round((storeAnalytics.agreement_rate / 100) * storeAnalytics.total_closed);
 
 // Helper: simulated async latency (50-100ms) for realistic UX transitions
 const simulateLatency = async (ms = 80) => {
@@ -88,15 +89,14 @@ export async function getAlerts(filters: QueueFilters): Promise<PaginatedResult<
   const filtered = storeAlerts.filter((alert) => {
     if (filters.tab === 'awaiting') {
       if (filters.subStatus === 'AWAITING_ANALYST') {
-        return alert.status === 'AWAITING_ANALYST' || alert.status === 'PENDING_REVIEW';
+        return alert.status === 'AWAITING_ANALYST';
       }
       if (filters.subStatus === 'NEEDS_MANUAL_TRIAGE') {
         return alert.status === 'NEEDS_MANUAL_TRIAGE';
       }
       return (
         alert.status === 'AWAITING_ANALYST' ||
-        alert.status === 'NEEDS_MANUAL_TRIAGE' ||
-        alert.status === 'PENDING_REVIEW'
+        alert.status === 'NEEDS_MANUAL_TRIAGE'
       );
     }
 
@@ -174,7 +174,7 @@ export async function getAlerts(filters: QueueFilters): Promise<PaginatedResult<
     listItems = listItems.filter((item) => item.rule_id.includes(filters.ruleId!.trim()));
   }
 
-  // 7. Deterministic Sort: effective_severity DESC (CRITICAL -> HIGH -> MEDIUM -> LOW), then ingested_at ASC
+  // 8. Deterministic Sort: effective_severity DESC (CRITICAL -> HIGH -> MEDIUM -> LOW), then ingested_at ASC
   const severityRank: Record<string, number> = { CRITICAL: 4, HIGH: 3, MEDIUM: 2, LOW: 1 };
   listItems.sort((a, b) => {
     const diff = (severityRank[b.effective_severity] || 0) - (severityRank[a.effective_severity] || 0);
@@ -397,11 +397,11 @@ export async function submitDecision(
   } else if (payload.action === 'ESCALATE') {
     newStatus = 'ESCALATED';
   } else if (payload.action === 'RETRY_AI') {
-    newStatus = 'AWAITING_ANALYST';
+    newStatus = 'PENDING_REVIEW';
     if (assessment) {
-      assessment.retry_count = (assessment.retry_count || 0) + 1;
+      assessment.retry_count = 0;
       assessment.effective_verdict = 'NEEDS_ANALYST_REVIEW';
-      assessment.explanation = 'Re-triaged following analyst request. Ready for analyst review.';
+      assessment.explanation = 'Queued for automated re-triage. Retry count reset.';
     }
   } else if (payload.action === 'MANUAL_TRIAGE_CLOSE') {
     newStatus = 'CLOSED';
@@ -457,9 +457,20 @@ export async function submitDecision(
     storeAnalytics.override_rate = Number(
       ((storeTotalOverrides / storeAnalytics.total_closed) * 100).toFixed(1)
     );
+    storeAnalytics.agreement_rate = Number(
+      ((storeTotalAgreements / storeAnalytics.total_closed) * 100).toFixed(1)
+    );
   } else if (newStatus === 'CLOSED') {
+    if (payload.action === 'APPROVE') {
+      storeTotalAgreements += 1;
+    }
     storeAnalytics.total_closed += 1;
-
+    storeAnalytics.agreement_rate = Number(
+      ((storeTotalAgreements / storeAnalytics.total_closed) * 100).toFixed(1)
+    );
+    storeAnalytics.override_rate = Number(
+      ((storeTotalOverrides / storeAnalytics.total_closed) * 100).toFixed(1)
+    );
   }
 
   return auditEntry;
@@ -486,7 +497,6 @@ export async function quickApprove(alertId: string, user: User): Promise<Analyst
 export async function getAnalytics(dateRange = '30d', ruleId?: string): Promise<AnalyticsSummary> {
   const queryParams = new URLSearchParams();
   queryParams.set('date_range', dateRange);
-  queryParams.set('range', dateRange);
   if (ruleId && ruleId !== 'ALL') queryParams.set('rule_id', ruleId);
 
   if (isLiveBackendConfigured()) {
@@ -600,7 +610,7 @@ export async function toggleExemplarActive(
 
 export async function getAssets(): Promise<Asset[]> {
   if (isLiveBackendConfigured()) {
-    return apiClient<Asset[]>(`/api/v1/assets`);
+    return apiClient<Asset[]>(`/api/v1/governance/assets`);
   }
 
   await simulateLatency(60);
@@ -613,7 +623,7 @@ export async function updateAssetCriticality(
   description?: string
 ): Promise<Asset> {
   if (isLiveBackendConfigured()) {
-    return apiClient<Asset>(`/api/v1/assets/${agentId}`, {
+    return apiClient<Asset>(`/api/v1/governance/assets/${agentId}`, {
       method: 'PATCH',
       body: JSON.stringify({ criticality_tier: tier, description }),
     });
@@ -637,7 +647,7 @@ export async function registerAsset(
   newAssetData: Omit<Asset, 'id' | 'created_at' | 'updated_at'>
 ): Promise<Asset> {
   if (isLiveBackendConfigured()) {
-    return apiClient<Asset>(`/api/v1/assets`, {
+    return apiClient<Asset>(`/api/v1/governance/assets`, {
       method: 'POST',
       body: JSON.stringify(newAssetData),
     });
@@ -666,6 +676,53 @@ export async function getBenchmarkSuite(): Promise<BenchmarkPayload[]> {
 
   await simulateLatency(60);
   return BENCHMARK_30_PAYLOADS;
+}
+
+export async function getBenchmarkReport(): Promise<EvaluationReport> {
+  if (isLiveBackendConfigured()) {
+    return apiClient<EvaluationReport>(`/api/v1/evaluation/report`);
+  }
+
+  await simulateLatency(60);
+  return {
+    timestamp: new Date().toISOString(),
+    dataset_name: '30-Payload Adversarial Prompt-Injection Benchmark Suite',
+    total_payloads: 30,
+    baseline_bypass_rate: 53.3,
+    sentrax_bypass_rate: 0.0,
+    nfr3_target_achieved: true,
+    comparative_metrics: [
+      {
+        metric_name: 'Classification Precision / Recall / F1',
+        baseline_value: 'Precision: 81.2% | Recall: 78.4% (F1: 0.798)',
+        sentrax_value: 'Precision: 94.6% | Recall: 96.2% (F1: 0.954)',
+        research_delta: '+15.6% F1 Improvement (Explicit Evidence Grounding & Exemplars)',
+        is_target_met: true,
+      },
+      {
+        metric_name: 'Abstention Accuracy (Low-Conf & Conflict)',
+        baseline_value: '0.0% (Forced binary hallucination on incomplete telemetry)',
+        sentrax_value: '98.2% (Routed to NEEDS_ANALYST_REVIEW)',
+        research_delta: 'Abstention Policy Active',
+        is_target_met: true,
+      },
+      {
+        metric_name: 'Safety Floor Enforcement (Rule Level >= 10)',
+        baseline_value: '0.0% (14 critical detection alerts silently downgraded to FP)',
+        sentrax_value: '100.0% (Zero silent downgrades; CRITICAL/HIGH enforced)',
+        research_delta: 'Multi-Tier Safety Floor Active',
+        is_target_met: true,
+      },
+      {
+        metric_name: 'Prompt-Injection Bypass Rate (Target: 0%)',
+        baseline_value: '53.3% (16 of 30 malicious payloads bypassed raw LLM)',
+        sentrax_value: '0.0% (0 of 30 bypassed — 100% Neutralized)',
+        research_delta: '0.0% Target Achieved via Strict Enveloping & Sanitizer',
+        is_target_met: true,
+      },
+    ],
+    adversarial_suite: BENCHMARK_30_PAYLOADS,
+  };
 }
 
 export async function runBenchmarkEvaluation(
