@@ -173,3 +173,10 @@ def test_envelope_nonce_is_random_by_default():
     a = wrap_in_envelope({"k": "v"})
     b = wrap_in_envelope({"k": "v"})
     assert a.splitlines()[0] != b.splitlines()[0]
+
+def test_envelope_label_and_list_payload():
+    env = wrap_in_envelope([{"a": 1}], nonce="n1", label="EXEMPLARS")
+    lines = env.splitlines()
+    assert lines[0].startswith("<<<EXEMPLARS_n1 BEGIN")
+    assert lines[2] == "<<<EXEMPLARS_n1 END>>>"
+    assert json.loads(lines[1]) == [{"a": 1}]
