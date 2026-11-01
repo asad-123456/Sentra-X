@@ -191,7 +191,7 @@ export const TriageQueueTable: React.FC<TriageQueueTableProps> = ({
                         <span>MITRE {alert.mitre_techniques.join(', ')}</span>
                       </div>
                       <div className="text-[11px] text-zinc-400 font-sans italic truncate max-w-md mt-1">
-                        "{alert.truncated_explanation}"
+                        "{alert.explanation_snippet || alert.truncated_explanation}"
                       </div>
                     </td>
 

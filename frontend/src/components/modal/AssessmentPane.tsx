@@ -27,14 +27,19 @@ export const AssessmentPane: React.FC<AssessmentPaneProps> = ({
   selectedCitationKey,
   onSelectCitationKey,
 }) => {
-  const { alert, assessment, evidence_pack, injected_exemplars, correlated_alerts, decision_audit_trail } = alertDetail;
+  const alert = alertDetail.alert;
+  const assessment = alertDetail.assessment || alertDetail.ai_assessment;
+  const evidence_pack = alertDetail.evidence_pack;
+  const injected_exemplars = alertDetail.injected_exemplars || alertDetail.relevant_exemplars || [];
+  const correlated_alerts = alertDetail.correlated_alerts || alertDetail.evidence_pack?.temporal_context || [];
+  const decision_audit_trail = alertDetail.decision_audit_trail || alertDetail.audit_trail || [];
 
   return (
     <div className="h-full overflow-y-auto p-5 space-y-6 text-zinc-100 font-mono text-xs pr-4 custom-scrollbar">
       {/* 1. Guardrail Intervention Banners */}
       <div className="space-y-3">
         {/* Safety Floor Banner */}
-        {assessment.safety_floor_triggered && (
+        {assessment?.safety_floor_triggered && (
           <div className="p-3.5 rounded-xl bg-red-950/40 border border-red-800/80 shadow-[0_0_12px_rgba(239,68,68,0.08)] space-y-2">
             <div className="flex items-center justify-between text-red-300 font-bold">
               <div className="flex items-center gap-2">
@@ -63,7 +68,7 @@ export const AssessmentPane: React.FC<AssessmentPaneProps> = ({
         )}
 
         {/* Abstention Banner */}
-        {assessment.abstention_triggered && (
+        {assessment?.abstention_triggered && (
           <div className="p-3.5 rounded-xl bg-amber-950/40 border border-amber-800/80 shadow-[0_0_12px_rgba(245,158,11,0.06)] space-y-2">
             <div className="flex items-center justify-between text-amber-300 font-bold">
               <div className="flex items-center gap-2">
@@ -71,24 +76,32 @@ export const AssessmentPane: React.FC<AssessmentPaneProps> = ({
                 <span>Abstention Triggered</span>
               </div>
               <span className="text-[10px] px-2 py-0.5 rounded bg-amber-900/60 border border-amber-700/60 text-amber-200">
-                Threshold &lt; 60%
+                {assessment.confidence_score !== null && assessment.confidence_score !== undefined && assessment.confidence_score < 0.6
+                  ? 'Confidence < 60%'
+                  : 'Policy Constraint / Guardrail'}
               </span>
             </div>
 
             <div className="text-zinc-300 font-sans text-xs leading-relaxed">
-              Confidence score{' '}
-              <strong className="text-amber-200 font-mono">
-                {assessment.confidence_score !== null && assessment.confidence_score !== undefined
-                  ? `${Math.round(assessment.confidence_score * 100)}%`
-                  : 'N/A'}
-              </strong>{' '}
-              falls below autonomous triage threshold or cited evidence requires human contextual validation. Automated binary decision withheld.
+              {assessment.guardrail_audit_note ? (
+                <span>{assessment.guardrail_audit_note}</span>
+              ) : (
+                <>
+                  Confidence score{' '}
+                  <strong className="text-amber-200 font-mono">
+                    {assessment.confidence_score !== null && assessment.confidence_score !== undefined
+                      ? `${Math.round(assessment.confidence_score * 100)}%`
+                      : 'N/A'}
+                  </strong>{' '}
+                  falls below autonomous triage threshold or cited evidence requires human contextual validation. Automated binary decision withheld.
+                </>
+              )}
             </div>
           </div>
         )}
 
         {/* Prompt-Injection Intercept Warning */}
-        {evidence_pack.injection_suspect && (
+        {evidence_pack?.injection_suspect && (
           <div className="p-3.5 rounded-xl bg-fuchsia-950/40 border border-fuchsia-800/80 shadow-[0_0_12px_rgba(217,70,239,0.08)] space-y-2">
             <div className="flex items-center justify-between text-fuchsia-300 font-bold">
               <div className="flex items-center gap-2">
@@ -108,100 +121,114 @@ export const AssessmentPane: React.FC<AssessmentPaneProps> = ({
       </div>
 
       {/* 2. Automated AI Assessment Card */}
-      <div className="p-4 rounded-xl bg-zinc-950 border border-zinc-800 space-y-3.5">
-        <div className="flex items-center justify-between border-b border-zinc-800/80 pb-2.5">
-          <div className="flex items-center gap-2 text-zinc-200 font-semibold text-xs">
-            <Sparkles className="size-4 text-cyan-400" />
-            <span>Model Assessment</span>
-          </div>
-          <div className="flex items-center gap-2 text-[11px] text-zinc-400">
-            <span className="px-2 py-0.5 rounded bg-zinc-900 border border-zinc-800 text-cyan-300 font-mono">
-              {assessment.model_name}
-            </span>
-            <span>{assessment.latency_ms}ms</span>
-          </div>
-        </div>
-
-        {/* Verdict & Severity Badges Grid */}
-        <div className="grid grid-cols-2 gap-3 py-1">
-          <div className="space-y-1">
-            <span className="text-[10px] text-zinc-500 font-mono">EFFECTIVE VERDICT</span>
-            <div>
-              <VerdictBadge verdict={assessment.effective_verdict} />
+      {assessment ? (
+        <div className="p-4 rounded-xl bg-zinc-950 border border-zinc-800 space-y-3.5">
+          <div className="flex items-center justify-between border-b border-zinc-800/80 pb-2.5">
+            <div className="flex items-center gap-2 text-zinc-200 font-semibold text-xs">
+              <Sparkles className="size-4 text-cyan-400" />
+              <span>Model Assessment</span>
+            </div>
+            <div className="flex items-center gap-2 text-[11px] text-zinc-400">
+              <span className="px-2 py-0.5 rounded bg-zinc-900 border border-zinc-800 text-cyan-300 font-mono">
+                {assessment.model_name || 'Gemini 1.5 Pro'}
+              </span>
+              <span>{assessment.latency_ms || 0}ms</span>
             </div>
           </div>
 
-          <div className="space-y-1">
-            <span className="text-[10px] text-zinc-500 font-mono">EFFECTIVE SEVERITY</span>
-            <div>
-              <SeverityBadge
-                severity={assessment.effective_severity}
-                safetyFloorUpgraded={assessment.safety_floor_triggered}
-              />
+          {/* Verdict & Severity Badges Grid */}
+          <div className="grid grid-cols-2 gap-3 py-1">
+            <div className="space-y-1">
+              <span className="text-[10px] text-zinc-500 font-mono">EFFECTIVE VERDICT</span>
+              <div>
+                <VerdictBadge verdict={assessment.effective_verdict} />
+              </div>
+            </div>
+
+            <div className="space-y-1">
+              <span className="text-[10px] text-zinc-500 font-mono">EFFECTIVE SEVERITY</span>
+              <div>
+                <SeverityBadge
+                  severity={assessment.effective_severity}
+                  safetyFloorUpgraded={assessment.safety_floor_triggered}
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Confidence Meter */}
+          <div className="space-y-1 pt-1">
+            <div className="flex items-center justify-between text-[10px] text-zinc-500">
+              <span>MODEL CONFIDENCE</span>
+              <span className="text-zinc-400">
+                {assessment.confidence_score !== null && assessment.confidence_score !== undefined
+                  ? `${Math.round(assessment.confidence_score * 100)}%`
+                  : 'Undetermined'}
+              </span>
+            </div>
+            <ConfidenceMeter score={assessment.confidence_score} />
+          </div>
+
+          {/* Full Explanation */}
+          <div className="space-y-1.5 pt-1">
+            <span className="text-[10px] text-zinc-500 font-mono">ANALYST EXPLANATION</span>
+            <div className="p-3 rounded-lg bg-zinc-900/70 border border-zinc-800 text-zinc-200 font-sans text-xs leading-relaxed">
+              {assessment.explanation}
             </div>
           </div>
         </div>
-
-        {/* Confidence Meter */}
-        <div className="space-y-1 pt-1">
-          <div className="flex items-center justify-between text-[10px] text-zinc-500">
-            <span>MODEL CONFIDENCE</span>
-            <span className="text-zinc-400">
-              {assessment.confidence_score !== null && assessment.confidence_score !== undefined
-                ? `${Math.round(assessment.confidence_score * 100)}%`
-                : 'Undetermined'}
-            </span>
+      ) : (
+        <div className="p-4 rounded-xl bg-zinc-950 border border-zinc-800 space-y-2">
+          <div className="flex items-center gap-2 text-zinc-300 font-semibold text-xs">
+            <Clock className="size-4 text-amber-400" />
+            <span>Manual Triage Required</span>
           </div>
-          <ConfidenceMeter score={assessment.confidence_score} />
+          <p className="text-zinc-400 text-xs font-sans">
+            This alert bypassed automated AI assessment due to queue policy or retry limit exhaustion. Direct analyst adjudication is required.
+          </p>
         </div>
-
-        {/* Full Explanation */}
-        <div className="space-y-1.5 pt-1">
-          <span className="text-[10px] text-zinc-500 font-mono">ANALYST EXPLANATION</span>
-          <div className="p-3 rounded-lg bg-zinc-900/70 border border-zinc-800 text-zinc-200 font-sans text-xs leading-relaxed">
-            {assessment.explanation}
-          </div>
-        </div>
-      </div>
+      )}
 
       {/* 3. Interactive Cited Evidence Key Pills */}
-      <div className="p-4 rounded-xl bg-zinc-950 border border-zinc-800 space-y-3">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2 text-zinc-200 font-semibold text-xs">
-            <Link2 className="size-4 text-cyan-400" />
-            <span>Evidence Citations</span>
+      {assessment?.cited_evidence_keys && assessment.cited_evidence_keys.length > 0 && (
+        <div className="p-4 rounded-xl bg-zinc-950 border border-zinc-800 space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2 text-zinc-200 font-semibold text-xs">
+              <Link2 className="size-4 text-cyan-400" />
+              <span>Evidence Citations</span>
+            </div>
+            <span className="text-[10px] text-zinc-500">
+              {assessment.cited_evidence_keys.length} verified fields
+            </span>
           </div>
-          <span className="text-[10px] text-zinc-500">
-            {assessment.cited_evidence_keys.length} verified fields
-          </span>
-        </div>
 
-        <p className="text-[11px] text-zinc-400 font-sans">
-          Click any citation key below to immediately scroll and highlight its verified telemetry path in the evidence tree:
-        </p>
+          <p className="text-[11px] text-zinc-400 font-sans">
+            Click any citation key below to immediately scroll and highlight its verified telemetry path in the evidence tree:
+          </p>
 
-        <div className="flex flex-wrap gap-2 pt-1">
-          {assessment.cited_evidence_keys.map((key) => {
-            const isSelected = selectedCitationKey === key;
-            return (
-              <button
-                key={key}
-                type="button"
-                onClick={() => onSelectCitationKey(key)}
-                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-mono transition-all cursor-pointer ${
-                  isSelected
-                    ? 'bg-cyan-950 text-cyan-200 border border-cyan-500 shadow-[0_0_10px_rgba(6,182,212,0.3)] ring-1 ring-cyan-400'
-                    : 'bg-zinc-900 hover:bg-zinc-850 text-zinc-300 hover:text-white border border-zinc-800 hover:border-zinc-700'
-                }`}
-                title={`Highlight field "${key}" in evidence tree`}
-              >
-                <FileCode className={`size-3 ${isSelected ? 'text-cyan-400' : 'text-zinc-500'}`} />
-                <span className="truncate max-w-[280px]">{key}</span>
-              </button>
-            );
-          })}
+          <div className="flex flex-wrap gap-2 pt-1">
+            {assessment.cited_evidence_keys.map((key) => {
+              const isSelected = selectedCitationKey === key;
+              return (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => onSelectCitationKey(key)}
+                  className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-mono transition-all cursor-pointer ${
+                    isSelected
+                      ? 'bg-cyan-950 text-cyan-200 border border-cyan-500 shadow-[0_0_10px_rgba(6,182,212,0.3)] ring-1 ring-cyan-400'
+                      : 'bg-zinc-900 hover:bg-zinc-850 text-zinc-300 hover:text-white border border-zinc-800 hover:border-zinc-700'
+                  }`}
+                  title={`Highlight field "${key}" in evidence tree`}
+                >
+                  <FileCode className={`size-3 ${isSelected ? 'text-cyan-400' : 'text-zinc-500'}`} />
+                  <span className="truncate max-w-[280px]">{key}</span>
+                </button>
+              );
+            })}
+          </div>
         </div>
-      </div>
+      )}
 
       {/* 4. Matched Few-Shot Feedback Exemplars */}
       {injected_exemplars && injected_exemplars.length > 0 && (
@@ -244,6 +271,13 @@ export const AssessmentPane: React.FC<AssessmentPaneProps> = ({
                 <div className="text-[11px] text-zinc-400 font-mono">
                   Rule {ex.rule_id} • <span className="text-zinc-300 font-semibold">{ex.process_signature}</span>
                 </div>
+
+                {ex.match_tier_support === 'Tier 2' && (
+                  <div className="p-2 rounded bg-amber-950/40 border border-amber-800/60 text-amber-300 text-[11px] font-mono flex items-center gap-1.5">
+                    <AlertTriangle className="size-3 text-amber-400 shrink-0" />
+                    <span>Caution: Verify command-line arguments and source IP similarity before applying this asset-tier fallback exemplar.</span>
+                  </div>
+                )}
 
                 <div className="text-xs text-zinc-300 font-sans italic bg-zinc-950/60 p-2 rounded border border-zinc-850">
                   "{ex.rationale}"

@@ -24,7 +24,7 @@ import {
 
 interface DecisionActionPanelProps {
   alert: Alert;
-  assessment: AIAssessment;
+  assessment?: AIAssessment;
   userRole: UserRole;
   isSubmitting: boolean;
   onSubmitDecision: (payload: DecisionPayload) => Promise<void>;
@@ -49,9 +49,9 @@ export const DecisionActionPanel: React.FC<DecisionActionPanelProps> = ({
 
   // Form states
   const [verdict, setVerdict] = useState<BinaryVerdict>(
-    assessment.effective_verdict === 'FALSE_POSITIVE' ? 'FALSE_POSITIVE' : 'TRUE_POSITIVE'
+    assessment?.effective_verdict === 'FALSE_POSITIVE' ? 'FALSE_POSITIVE' : 'TRUE_POSITIVE'
   );
-  const [severity, setSeverity] = useState<SeverityLevel>(assessment.effective_severity);
+  const [severity, setSeverity] = useState<SeverityLevel>(assessment?.effective_severity || 'HIGH');
   const [rationale, setRationale] = useState<string>('');
   const [saveExemplar, setSaveExemplar] = useState<boolean>(true);
   const [validationError, setValidationError] = useState<string | null>(null);
@@ -64,8 +64,8 @@ export const DecisionActionPanel: React.FC<DecisionActionPanelProps> = ({
   };
 
   const handleApproveClick = async () => {
-    // If effective verdict is NEEDS_ANALYST_REVIEW, analyst must pick binary verdict first
-    if (assessment.effective_verdict === 'NEEDS_ANALYST_REVIEW') {
+    // If effective verdict is NEEDS_ANALYST_REVIEW or assessment missing, analyst must pick binary verdict first
+    if (!assessment || assessment.effective_verdict === 'NEEDS_ANALYST_REVIEW') {
       setPanelMode('approve_prompt');
       return;
     }
@@ -85,7 +85,7 @@ export const DecisionActionPanel: React.FC<DecisionActionPanelProps> = ({
       alert_id: alert.id,
       action: 'APPROVE',
       final_verdict: chosenVerdict,
-      final_severity: assessment.effective_severity,
+      final_severity: assessment?.effective_severity || 'HIGH',
       rationale: `Accepted assessment with confirmed ${chosenVerdict} disposition.`,
     });
   };
@@ -363,12 +363,12 @@ export const DecisionActionPanel: React.FC<DecisionActionPanelProps> = ({
                 <div className="space-y-2 p-3 rounded-lg bg-zinc-900/60 border border-zinc-850">
                   <span className="text-[10px] font-mono text-zinc-500 uppercase tracking-wider">Current AI Assessment</span>
                   <div className="flex items-center gap-2">
-                    <span className="text-xs font-mono font-bold text-zinc-300">{assessment.effective_verdict}</span>
+                    <span className="text-xs font-mono font-bold text-zinc-300">{assessment?.effective_verdict || 'N/A'}</span>
                     <span className="text-zinc-600">•</span>
-                    <span className="text-xs font-mono font-semibold text-zinc-400">{assessment.effective_severity}</span>
+                    <span className="text-xs font-mono font-semibold text-zinc-400">{assessment?.effective_severity || 'N/A'}</span>
                   </div>
                   <div className="text-[11px] text-zinc-500 font-sans line-clamp-2">
-                    {assessment.explanation}
+                    {assessment?.explanation || 'No model assessment available.'}
                   </div>
                 </div>
 
@@ -379,7 +379,7 @@ export const DecisionActionPanel: React.FC<DecisionActionPanelProps> = ({
                       Proposed Analyst Override
                     </span>
                     <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-cyan-950 text-cyan-300 border border-cyan-700/80">
-                      {verdict === assessment.effective_verdict ? 'Severity Adjustment' : 'Verdict Flip'}
+                      {verdict === assessment?.effective_verdict ? 'Severity Adjustment' : 'Verdict Flip'}
                     </span>
                   </div>
                   <div className="flex items-center gap-2">

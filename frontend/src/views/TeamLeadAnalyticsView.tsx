@@ -94,9 +94,14 @@ export const TeamLeadAnalyticsView: React.FC = () => {
       {/* View Header */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div className="space-y-1">
-          <h1 className="text-xl font-bold tracking-tight text-zinc-50 font-mono">
-            Triage Analytics &amp; Calibration
-          </h1>
+          <div className="flex items-center gap-2">
+            <h1 className="text-xl font-bold tracking-tight text-zinc-50 font-mono">
+              Triage Analytics &amp; Calibration
+            </h1>
+            <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-zinc-900 text-zinc-400 border border-zinc-800">
+              Simulated Demo Fixture
+            </span>
+          </div>
           <p className="text-xs text-zinc-400 font-sans">
             Analyst agreement metrics, override frequency, and audit logs.
           </p>

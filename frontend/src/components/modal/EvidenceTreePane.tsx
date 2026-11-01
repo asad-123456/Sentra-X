@@ -20,19 +20,19 @@ interface EvidenceTreePaneProps {
 type EvidenceTab = 'tree' | 'raw_json' | 'prompt_envelope';
 
 // Dot-notation & bracket-index key resolver matching backend/app/services/evidence_assembler.py
-const TOKEN = /([^.\[\]]+)|\[(\d+)\]/g;
+const TOKEN = /([^.[\]]+)|\[(\d+)\]/g;
 
 export function resolveKey(pack: unknown, key: string): unknown | undefined {
-  let cur: any = pack;
+  let cur: unknown = pack;
   for (const m of key.matchAll(TOKEN)) {
     const [, name, index] = m;
     if (name !== undefined) {
-      if (cur === null || typeof cur !== 'object' || Array.isArray(cur) || !(name in cur)) return undefined;
-      cur = cur[name];
+      if (cur === null || typeof cur !== 'object' || Array.isArray(cur) || !(name in (cur as Record<string, unknown>))) return undefined;
+      cur = (cur as Record<string, unknown>)[name];
     } else {
       const i = Number(index);
       if (!Array.isArray(cur) || i >= cur.length) return undefined;
-      cur = cur[i];
+      cur = (cur as unknown[])[i];
     }
   }
   return cur;
@@ -360,12 +360,17 @@ export const EvidenceTreePane: React.FC<EvidenceTreePaneProps> = ({
         {activeTab === 'prompt_envelope' && (
           <div className="space-y-3 flex flex-col h-full min-h-0">
             <div className="p-3.5 rounded-xl bg-cyan-950/20 border border-cyan-800/40 text-cyan-200 text-xs font-sans space-y-1 shrink-0">
-              <div className="font-semibold text-cyan-300 flex items-center gap-1.5 font-mono text-xs">
-                <ShieldCheck className="size-4" />
-                <span>Isolated Prompt Envelope Preview</span>
+              <div className="font-semibold text-cyan-300 flex items-center justify-between font-mono text-xs">
+                <div className="flex items-center gap-1.5">
+                  <ShieldCheck className="size-4" />
+                  <span>Isolated Prompt Envelope</span>
+                </div>
+                <span className="text-[10px] px-2 py-0.5 rounded bg-cyan-900/40 border border-cyan-700/50 text-cyan-300 font-mono">
+                  Illustrative Reconstruction
+                </span>
               </div>
               <p className="text-[11px] text-zinc-400">
-                Demonstrates how raw user/host telemetry is sanitized, stripped of adversarial delimiter strings, and quarantined inside read-only XML/JSON tags prior to LLM evaluation.
+                Client-side reconstruction showing sanitized telemetry quarantined inside nonce-delimited blocks (e.g. &lt;&lt;&lt;EVIDENCE_PACK_&lt;NONCE&gt;...&gt;&gt;&gt;) prior to LLM evaluation. Raw assembled prompts are transient and not stored in the database.
               </p>
             </div>
 
@@ -379,7 +384,7 @@ export const EvidenceTreePane: React.FC<EvidenceTreePaneProps> = ({
                     envelope_id: `env-${evidencePack.id}`,
                     sanitized_at: evidencePack.created_at,
                     injection_suspect: evidencePack.injection_suspect,
-                    delimiter_policy: 'STRICT_XML_ISOLATION_STRIPPED',
+                    delimiter_policy: 'RANDOM_NONCE_DELIMITED_ISOLATION',
                   },
                   read_only_telemetry_payload: evidencePack.telemetry_payload,
                   asset_context: evidencePack.asset_context,

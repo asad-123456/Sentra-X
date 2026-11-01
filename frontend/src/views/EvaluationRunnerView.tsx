@@ -269,9 +269,14 @@ export const EvaluationRunnerView: React.FC = () => {
       {/* Top Header & Execution Actions */}
       <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
         <div>
-          <h1 className="text-xl font-bold tracking-tight text-zinc-50 font-mono">
-            Adversarial Benchmark
-          </h1>
+          <div className="flex items-center gap-2">
+            <h1 className="text-xl font-bold tracking-tight text-zinc-50 font-mono">
+              Adversarial Benchmark
+            </h1>
+            <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-zinc-900 text-zinc-400 border border-zinc-800">
+              Simulated Demo Fixture
+            </span>
+          </div>
           <p className="text-xs text-zinc-400 mt-0.5">
             Prompt injection test suite and comparative evaluation scorecard.
           </p>

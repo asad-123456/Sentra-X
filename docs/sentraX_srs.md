@@ -17,10 +17,8 @@
     break-before: avoid-page !important;
   }
   .mermaid svg {
-    max-width: 98% !important;
-    max-height: 280px !important;
+    max-width: 100% !important;
     height: auto !important;
-    width: auto !important;
     display: block;
     margin: 0 auto !important;
   }
@@ -33,8 +31,8 @@
 
 | Document Attribute | Details |
 | :--- | :--- |
-| **Document Version** | 1.3 |
-| **Release Date** | October 11, 2026 |
+| **Document Version** | 1.4 |
+| **Release Date** | October 14, 2026 |
 | **Institution** | Department of Computer and Information Systems Engineering, NED University of Engineering & Technology |
 | **Authors** | Asad Ullah Zafar (CS-24082), Atta Ur Rehman (CS-24092), Abdur Rehman (CS-24098) |
 | **Supervisors / Reviewers** | Sir Ali Akhtar (Practical Class Teacher), Dr. Fakhra Aftab (Theory Class Teacher) |
@@ -808,12 +806,12 @@ erDiagram
 | Table Name | Primary Key | Key Columns & Constraints | Description |
 | :--- | :--- | :--- | :--- |
 | **`users`** | `id` (`UUID`) | `username` (`UNIQUE`), `email` (`UNIQUE`), `password_hash` (`bcrypt`), `role` (`Analyst` \| `TeamLead` \| `Admin`), `is_active` (`BOOL`) | Stores authenticated dashboard users and RBAC roles (`FR-8`). |
-| **`assets`** | `agent_id` (`VARCHAR`) | `hostname`, `ip_address`, `criticality_tier` (`LOW` \| `MEDIUM` \| `HIGH` \| `CRITICAL`), `updated_at` | Maps monitored Wazuh agents to business criticality tiers (`FR-9`). |
-| **`alerts`** | `id` (`UUID`) | `wazuh_alert_id` (`UNIQUE`), `rule_id`, `rule_level` (`INT`), `agent_id` (`FK`), `src_ip`, `process_signature`, `raw_payload` (`JSONB`), `status` | Stores ingested Wazuh alerts and lifecycle state (`FR-1`, `FR-5`). |
+| **`assets`** | `agent_id` (`VARCHAR`) | `hostname`, `ip_address`, `criticality_tier` (`LOW` \| `MEDIUM` \| `HIGH` \| `CRITICAL`), `updated_at`, `updated_by` (`UUID FK users.id`) | Maps monitored Wazuh agents to business criticality tiers (`FR-9`). |
+| **`alerts`** | `id` (`UUID`) | `wazuh_alert_id` (`UNIQUE`), `rule_id`, `rule_level` (`INT`), `agent_id` (`FK`), `agent_name` (`VARCHAR 255`), `src_ip`, `process_signature`, `raw_payload` (`JSONB`), `status`, `alert_timestamp` (`TIMESTAMPTZ`), `retry_count` (`SMALLINT DEFAULT 0`) | Stores ingested Wazuh alerts, host identity, retry count, and lifecycle state (`FR-1`, `FR-5`). |
 | **`evidence_packs`** | `id` (`UUID`) | `alert_id` (`FK UNIQUE`), `pack_json` (`JSONB`), `valid_dot_keys` (`JSONB`), `injection_suspect` (`BOOL`), `injected_exemplar_ids` (`JSONB`) | Stores sanitized Evidence Packs and valid citation key sets (`FR-2`). |
-| **`ai_assessments`** | `id` (`UUID`) | `alert_id` (`FK UNIQUE`), `raw_verdict`, `raw_severity`, `confidence_score`, `cited_evidence_keys` (`JSONB`), `effective_verdict`, `effective_severity`, `abstention_triggered`, `safety_floor_triggered`, `guardrail_audit_note` | Stores both raw LLM outputs and post-`FR-3` guardrail results (`FR-2`, `FR-3`). |
-| **`analyst_decisions_audit`** | `id` (`UUID`) | `alert_id` (`FK`), `user_id` (`FK`), `action_taken`, `previous_verdict`, `final_verdict`, `final_severity`, `rationale` (`TEXT`), `created_at` | Append-only immutable audit log of all human dispositions (`FR-6`, `NFR-4`). |
-| **`feedback_exemplars`** | `id` (`UUID`) | `source_alert_id` (`FK`), `rule_id`, `process_signature`, `asset_criticality`, `calibrated_verdict`, `calibrated_severity`, `rationale`, `is_active` (`BOOL`), `match_hit_count` | Stores verified override rationales for dynamic few-shot injection (`FR-4`). |
+| **`ai_assessments`** | `id` (`UUID`) | `alert_id` (`FK UNIQUE`), `raw_verdict`, `raw_severity`, `confidence_score`, `cited_evidence_keys` (`JSONB`), `effective_verdict`, `effective_severity`, `abstention_triggered`, `safety_floor_triggered`, `guardrail_audit_note`, `inference_latency_ms` (`INT`) | Stores both raw LLM outputs, post-`FR-3` guardrail results, and inference latency (`FR-2`, `FR-3`). |
+| **`analyst_decisions_audit`** | `id` (`UUID`) | `alert_id` (`FK`), `user_id` (`FK`), `action_taken` (`APPROVE`, `OVERRIDE`, `ESCALATE`, `RESOLVE_ESCALATION`, `MANUAL_TRIAGE_CLOSURE`, `MANUAL_TRIAGE_CLOSE`, `RETRY_AI`), `previous_verdict`, `final_verdict`, `final_severity`, `rationale` (`TEXT`), `created_at` | Append-only immutable audit log of all human dispositions (`FR-6`, `NFR-4`). |
+| **`feedback_exemplars`** | `id` (`UUID`) | `source_alert_id` (`FK`), `rule_id`, `process_signature`, `asset_criticality`, `calibrated_verdict`, `calibrated_severity`, `rationale`, `is_active` (`BOOL`), `match_hit_count`, `revoked_by` (`UUID FK users.id`), `revoked_at` (`TIMESTAMPTZ`) | Stores verified override rationales for dynamic few-shot injection and revocation metadata (`FR-4`). |
 
 ### 7.3 Data Flow, Indexing, Integrity & Retention
 1. **Primary & Queue Indexes:**
@@ -908,3 +906,4 @@ To verify the **`0%` prompt-injection bypass rate** (`NFR-3`), the `FR-10` bench
 | **1.1** | Sept 21, 2026 | Asad Ullah Zafar, Atta Ur Rehman, Abdur Rehman | Added Evidence Pack grounding, Abstention, Safety Floor, and Few-Shot Feedback Calibration. |
 | **1.2** | Oct 11, 2026 | Asad Ullah Zafar, Atta Ur Rehman, Abdur Rehman | Closed Safety Floor downgrade loopholes, added tiered exemplar matching & revocation, `NEEDS_MANUAL_TRIAGE` / `ESCALATED` workflows, `FR-9`, and `FR-10`. |
 | **1.3** | Oct 11, 2026 | Asad Ullah Zafar, Atta Ur Rehman, Abdur Rehman | Formatted into the 10-section SRS standard with structured functional tables, External Interfaces, NFR matrix, Mermaid System Models, Data Dictionary, Constraints, Assumptions, and Appendices. |
+| **1.4** | Oct 14, 2026 | Asad Ullah Zafar, Atta Ur Rehman, Abdur Rehman | **Final Submitted Deliverable.** Synchronized physical data dictionary (§7.2.1) with Alembic migration `0002_align_srs_v14` parity columns (`assets.updated_by`, `alerts.agent_name`, `alerts.alert_timestamp`, `alerts.retry_count`, `ai_assessments.inference_latency_ms`, `feedback_exemplars.revoked_by`, `feedback_exemplars.revoked_at`), updated `analyst_decisions_audit` check constraints for manual triage closure, and aligned with university CEP rubric. |

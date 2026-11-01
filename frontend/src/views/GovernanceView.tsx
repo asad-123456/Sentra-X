@@ -99,7 +99,7 @@ export const GovernanceView: React.FC = () => {
     };
   }, []);
 
-  const handleToggleExemplarActive = async (id: string, active: boolean) => {
+  const handleToggleExemplarActive = async (id: string | number, active: boolean) => {
     setExemplarError(null);
     try {
       const updated = await toggleExemplarActive(id, active);

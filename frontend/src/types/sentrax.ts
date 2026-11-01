@@ -33,6 +33,7 @@ export type DecisionAction =
   | 'ESCALATE'
   | 'RETRY_AI'
   | 'MANUAL_TRIAGE_CLOSE'
+  | 'MANUAL_TRIAGE_CLOSURE'
   | 'RESOLVE_ESCALATION';
 
 export type ExemplarMatchTier = 'Tier 1' | 'Tier 2';
@@ -96,11 +97,12 @@ export interface EvidencePack {
   };
   telemetry_payload: Record<string, unknown>;
   temporal_context: CorrelatedAlert[];
-  injected_exemplar_ids: string[];
+  injected_exemplar_ids: (number | string)[];
   injection_suspect: boolean;
   valid_dot_keys?: string[];
   pack_json?: Record<string, unknown>;
   created_at: string;
+  updated_at?: string;
 }
 
 export interface AIAssessment {
@@ -122,6 +124,7 @@ export interface AIAssessment {
   latency_ms: number;
   retry_count: number;
   created_at: string;
+  updated_at?: string;
 }
 
 export interface AnalystDecisionAudit {
@@ -141,8 +144,8 @@ export interface AnalystDecisionAudit {
 }
 
 export interface FeedbackExemplar {
-  id: string;
-  source_alert_id: string;
+  id: number | string;
+  source_alert_id: string | null;
   rule_id: string;
   process_signature: string;
   asset_criticality: AssetCriticalityTier;
@@ -170,6 +173,7 @@ export interface Alert {
   process_signature?: string;
   raw_payload?: Record<string, unknown>;
   status: AlertStatus;
+  retry_count?: number;
   ingested_at: string;
   updated_at: string;
 }
@@ -183,6 +187,7 @@ export interface AlertListItem extends Alert {
   effective_verdict: AIVerdict | 'NEEDS_MANUAL_TRIAGE';
   confidence_score?: number | null;
   truncated_explanation: string;
+  explanation_snippet?: string;
   safety_floor_triggered: boolean;
   abstention_triggered: boolean;
   injection_suspect: boolean;
@@ -193,10 +198,13 @@ export interface AlertListItem extends Alert {
 export interface AlertDetail {
   alert: Alert;
   evidence_pack: EvidencePack;
-  assessment: AIAssessment;
-  injected_exemplars: FeedbackExemplar[];
-  correlated_alerts: CorrelatedAlert[];
-  decision_audit_trail: AnalystDecisionAudit[];
+  assessment?: AIAssessment;
+  ai_assessment?: AIAssessment;
+  injected_exemplars?: FeedbackExemplar[];
+  relevant_exemplars?: FeedbackExemplar[];
+  correlated_alerts?: CorrelatedAlert[];
+  decision_audit_trail?: AnalystDecisionAudit[];
+  audit_trail?: AnalystDecisionAudit[];
 }
 
 export interface DecisionPayload {
@@ -239,8 +247,9 @@ export interface QueueCounts {
   closed: number;
   criticalSafetyFloor: number;
   abstentionWarnings: number;
-  awaitingAnalystCount: number;
-  needsManualTriageCount: number;
+  awaitingAnalystCount?: number;
+  needsManualTriageCount?: number;
+  meanLatencySeconds?: number;
 }
 
 export interface PaginatedResult<T> {
