@@ -18,6 +18,7 @@ import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Any, Callable, Literal, Sequence, get_args
+from uuid import UUID
 
 from dotenv import load_dotenv
 from pydantic import ValidationError
@@ -70,7 +71,7 @@ class LLMHTTPError(LLMCallError):
 class InjectedExemplar:
     """One FR-4 exemplar as it reaches the prompt builder (Atta's lookup returns these)."""
 
-    id: int
+    id: int | str | UUID
     match_tier: Literal["Tier 1", "Tier 2"]
     rule_id: str
     process_signature: str | None
@@ -180,6 +181,7 @@ def parse_llm_output(raw: str) -> LLMTriageOutput:
 # --- adapters ---------------------------------------------------------------
 class LLMAdapter(ABC):
     model_name: str
+    provider_name: str
 
     @abstractmethod
     def generate(self, system_prompt: str, user_prompt: str, timeout_s: float) -> str:
@@ -212,6 +214,7 @@ class MockAdapter(LLMAdapter):
     """
 
     model_name = "mock"
+    provider_name = "mock"
 
     def __init__(
         self,
@@ -298,6 +301,8 @@ CLAUDE_TOOL_SCHEMA = LLMTriageOutput.model_json_schema()
 
 
 class GeminiAdapter(LLMAdapter):
+    provider_name = "gemini"
+    
     def __init__(self, api_key: str, model: str = DEFAULT_GEMINI_MODEL):
         from google import genai
         from google.genai import types
@@ -345,6 +350,8 @@ def _translate_gemini_error(exc: Exception) -> LLMCallError | None:
 
 
 class ClaudeAdapter(LLMAdapter):
+    provider_name = "claude"
+    
     def __init__(self, api_key: str, model: str = DEFAULT_CLAUDE_MODEL):
         import anthropic
 

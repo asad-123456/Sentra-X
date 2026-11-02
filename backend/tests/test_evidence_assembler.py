@@ -285,3 +285,11 @@ def test_injection_in_a_field_name_is_flagged_and_key_is_safe():
     ep = assemble_evidence_pack(make_alert(raw_payload=raw), "HIGH")
     assert ep.injection_suspect is True
     assert "_removed_" in ep.pack["telemetry_payload"]["data"]
+
+def test_uuid_exemplar_ids_are_stored_as_strings():
+    import uuid
+
+    uid = uuid.uuid4()
+    ep = assemble_evidence_pack(make_alert(), "HIGH", exemplar_ids=[uid, 5, "abc"])
+    assert ep.injected_exemplar_ids == [str(uid), 5]
+    json.dumps(ep.injected_exemplar_ids)

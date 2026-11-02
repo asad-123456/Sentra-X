@@ -370,3 +370,10 @@ def test_provider_schemas_match_the_pydantic_model():
     assert set(CLAUDE_TOOL_SCHEMA["properties"]) == fields
     assert set(GEMINI_RESPONSE_SCHEMA["properties"]) == fields
     assert set(GEMINI_RESPONSE_SCHEMA["required"]) == fields
+
+def test_adapters_expose_provider_names(monkeypatch):
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    assert MockAdapter().provider_name == "mock"
+    assert get_adapter("gemini").provider_name == "gemini"
+    assert get_adapter("claude").provider_name == "claude"

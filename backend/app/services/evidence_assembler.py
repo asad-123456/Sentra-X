@@ -15,6 +15,7 @@ import re
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any, Sequence
+from uuid import UUID
 
 from app.services.prompt_sanitizer import sanitize_value
 
@@ -59,8 +60,12 @@ class EvidencePack:
     pack: dict                      # -> evidence_packs.pack_json
     valid_dot_keys: list[str]       # -> evidence_packs.valid_dot_keys
     injection_suspect: bool         # -> evidence_packs.injection_suspect
-    injected_exemplar_ids: list[int]  # -> evidence_packs.injected_exemplar_ids
+    injected_exemplar_ids: list[int | str]  # -> evidence_packs.injected_exemplar_ids
     findings: list[str] = field(default_factory=list)  # logging/debug only
+
+def _json_id(exemplar_id: int | str | UUID) -> int | str:
+       """Exemplar ids go into a JSONB column, which cannot hold a UUID object."""
+       return str(exemplar_id) if isinstance(exemplar_id, UUID) else exemplar_id
 
 
 # --- helpers ----------------------------------------------------------------
@@ -209,7 +214,7 @@ def assemble_evidence_pack(
     alert: AlertRecord,
     criticality_tier: str | None,
     candidate_alerts: Sequence[CorrelatedAlert] = (),
-    exemplar_ids: Sequence[int] = (),
+    exemplar_ids: Sequence[int | str | UUID] = (),
     k: int = MAX_CORRELATED,
     window: timedelta = CORRELATION_WINDOW,
 ) -> EvidencePack:
@@ -246,6 +251,6 @@ def assemble_evidence_pack(
         pack=pack,
         valid_dot_keys=valid_keys,
         injection_suspect=result.injection_suspect,
-        injected_exemplar_ids=list(exemplar_ids)[:MAX_EXEMPLARS],
+        injected_exemplar_ids=[_json_id(i) for i in list(exemplar_ids)[:MAX_EXEMPLARS]],
         findings=result.findings,
     )
