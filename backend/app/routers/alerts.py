@@ -373,7 +373,11 @@ def submit_alert_decision(
     if not action:
         raise HTTPException(status_code=400, detail="Action is required.")
 
-    VALID_ACTIONS = {"APPROVE", "OVERRIDE", "ESCALATE", "RETRY_AI", "MANUAL_TRIAGE_CLOSE", "MANUAL_TRIAGE_CLOSURE", "RESOLVE_ESCALATION"}
+    # Normalise legacy action alias to canonical SRS v1.4 spelling
+    if action == "MANUAL_TRIAGE_CLOSE":
+        action = "MANUAL_TRIAGE_CLOSURE"
+
+    VALID_ACTIONS = {"APPROVE", "OVERRIDE", "ESCALATE", "RETRY_AI", "MANUAL_TRIAGE_CLOSURE", "RESOLVE_ESCALATION"}
     if action not in VALID_ACTIONS:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -385,7 +389,7 @@ def submit_alert_decision(
     final_severity = payload.get("final_severity")
 
     # Enforce >= 10 char rationale on actions requiring mandatory justification (FR-6, AC-11)
-    if action in ("OVERRIDE", "MANUAL_TRIAGE_CLOSE", "MANUAL_TRIAGE_CLOSURE", "RESOLVE_ESCALATION"):
+    if action in ("OVERRIDE", "MANUAL_TRIAGE_CLOSURE", "RESOLVE_ESCALATION"):
         if len(rationale) < 10:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -437,7 +441,7 @@ def submit_alert_decision(
 
     # Handle status transition (SRS v1.4 §6.4, FR-6, UC-7)
     exemplar_created = False
-    if action in ("APPROVE", "OVERRIDE", "MANUAL_TRIAGE_CLOSE", "MANUAL_TRIAGE_CLOSURE", "RESOLVE_ESCALATION"):
+    if action in ("APPROVE", "OVERRIDE", "MANUAL_TRIAGE_CLOSURE", "RESOLVE_ESCALATION"):
         alert.status = "CLOSED"
     elif action == "ESCALATE":
         alert.status = "ESCALATED"
@@ -484,7 +488,7 @@ def submit_alert_decision(
         exemplar = FeedbackExemplar(
             source_alert_id=alert.id,
             rule_id=alert.rule_id,
-            process_signature=alert.process_signature or "Unknown Process",
+            process_signature=alert.process_signature,
             asset_criticality=asset.criticality_tier if asset else "MEDIUM",
             calibrated_verdict=final_verdict,
             calibrated_severity=final_severity,

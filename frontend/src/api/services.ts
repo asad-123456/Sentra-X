@@ -9,6 +9,7 @@
 
 import { apiClient, isLiveBackendConfigured, ApiError } from './client';
 import type {
+  AIAssessment,
   Alert,
   AlertDetail,
   AlertListItem,
@@ -246,7 +247,11 @@ export async function getQueueCounts(): Promise<QueueCounts> {
 
 export async function getAlertDetail(alertId: string): Promise<AlertDetail> {
   if (isLiveBackendConfigured()) {
-    const raw = await apiClient<any>(`/api/v1/alerts/${alertId}`);
+    const raw = await apiClient<AlertDetail & {
+      assessment?: AIAssessment;
+      decision_audit_trail?: AnalystDecisionAudit[];
+      injected_exemplars?: FeedbackExemplar[];
+    }>(`/api/v1/alerts/${alertId}`);
     const assessment = raw.assessment || raw.ai_assessment;
     const audit_trail = raw.decision_audit_trail || raw.audit_trail || [];
     const injected_exemplars = raw.injected_exemplars || raw.relevant_exemplars || [];
@@ -322,7 +327,7 @@ export async function getAlertDetail(alertId: string): Promise<AlertDetail> {
       safety_floor_triggered: alert.rule_level >= 10,
       abstention_triggered: true,
       llm_provider: 'Gemini',
-      model_name: 'gemini-2.5-flash',
+      model_name: 'gemini-3.1-flash-lite',
       latency_ms: 2000,
       retry_count: 0,
       created_at: alert.ingested_at,
@@ -397,7 +402,7 @@ export async function submitDecision(
   // Validation: Rationale >= 10 characters for actions requiring mandatory justification per FR-6
   const requiresRationale =
     payload.action === 'OVERRIDE' ||
-    payload.action === 'MANUAL_TRIAGE_CLOSE' ||
+    payload.action === 'MANUAL_TRIAGE_CLOSURE' ||
     payload.action === 'RESOLVE_ESCALATION';
 
   if (requiresRationale) {
@@ -424,7 +429,7 @@ export async function submitDecision(
       assessment.effective_verdict = 'NEEDS_ANALYST_REVIEW';
       assessment.explanation = 'Queued for automated re-triage. Retry count reset.';
     }
-  } else if (payload.action === 'MANUAL_TRIAGE_CLOSE') {
+  } else if (payload.action === 'MANUAL_TRIAGE_CLOSURE') {
     newStatus = 'CLOSED';
   } else if (payload.action === 'RESOLVE_ESCALATION') {
     newStatus = 'CLOSED';
@@ -516,6 +521,39 @@ export async function quickApprove(alertId: string, user: User): Promise<Analyst
 // Analytics & CSV Export Services (FR-7, NFR-4, NFR-5)
 // ---------------------------------------------------------------------------
 
+interface RawAnalyticsData {
+  total_closed?: number;
+  total_closed_decisions?: number;
+  agreement_rate?: number;
+  ai_agreement_rate?: number;
+  override_rate?: number;
+  human_override_rate?: number;
+  escalated_rate?: number;
+  manual_triage_rate?: number;
+  mean_latency_seconds?: number;
+  mean_triage_latency_seconds?: number;
+  cohens_kappa?: number;
+  precision?: number;
+  recall?: number;
+  accuracy?: number;
+  confusion_matrix?: {
+    tp_tp: number;
+    tp_fp_overridden: number;
+    fp_tp_overridden: number;
+    fp_fp: number;
+  };
+  agreement_matrix?: Record<string, number>;
+  override_root_causes?: Array<{ cause: string; count: number; percentage: number }> | Record<string, number>;
+  trendline?: Array<Record<string, unknown>>;
+  override_trend?: Array<Record<string, unknown>>;
+  severity_deltas?: AnalyticsSummary['severity_deltas'];
+  guardrail_breakdown?: {
+    safety_floor_interventions?: number;
+    abstention_fallbacks?: number;
+    prompt_injection_flags?: number;
+  };
+}
+
 export async function getAnalytics(dateRange = '30d', ruleId?: string): Promise<AnalyticsSummary> {
   const queryParams = new URLSearchParams();
   queryParams.set('range', dateRange);
@@ -523,7 +561,7 @@ export async function getAnalytics(dateRange = '30d', ruleId?: string): Promise<
   if (ruleId && ruleId !== 'ALL') queryParams.set('rule_id', ruleId);
 
   if (isLiveBackendConfigured()) {
-    const raw = await apiClient<any>(`/api/v1/analytics?${queryParams.toString()}`);
+    const raw = await apiClient<RawAnalyticsData>(`/api/v1/analytics?${queryParams.toString()}`);
     return {
       total_closed: raw.total_closed ?? raw.total_closed_decisions ?? 0,
       agreement_rate: raw.agreement_rate ?? raw.ai_agreement_rate ?? 0,
@@ -548,12 +586,12 @@ export async function getAnalytics(dateRange = '30d', ruleId?: string): Promise<
             count: Number(count),
             percentage: Math.round((Number(count) / 100) * 100),
           })),
-      trendline: (raw.trendline || raw.override_trend || []).map((p: any) => ({
-        date: p.date,
-        total_closed: p.total_closed ?? p.total_decisions ?? 0,
-        override_count: p.override_count ?? Math.round(((p.total_closed ?? p.total_decisions ?? 0) * (p.override_rate ?? 0)) / 100),
-        override_rate: p.override_rate ?? 0,
-        exemplar_count: p.exemplar_count ?? p.active_exemplars ?? 0,
+      trendline: (raw.trendline || raw.override_trend || []).map((p: Record<string, unknown>) => ({
+        date: String(p.date),
+        total_closed: Number(p.total_closed ?? p.total_decisions ?? 0),
+        override_count: Number(p.override_count ?? Math.round(((Number(p.total_closed ?? p.total_decisions ?? 0)) * (Number(p.override_rate ?? 0))) / 100)),
+        override_rate: Number(p.override_rate ?? 0),
+        exemplar_count: Number(p.exemplar_count ?? p.active_exemplars ?? 0),
       })),
       severity_deltas: raw.severity_deltas || {
         low_to_critical: 2,

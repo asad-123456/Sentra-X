@@ -21,13 +21,13 @@ class AnalystDecisionAudit(Base):
     SRS v1.4 (§7.2.1):
       action_taken CHECK allows:
         APPROVE | OVERRIDE | ESCALATE | RETRY_AI | MANUAL_TRIAGE_CLOSURE |
-        MANUAL_TRIAGE_CLOSE | RESOLVE_ESCALATION
+        RESOLVE_ESCALATION
     """
 
     __tablename__ = "analyst_decisions_audit"
     __table_args__ = (
         CheckConstraint(
-            "action_taken IN ('APPROVE','OVERRIDE','ESCALATE','RETRY_AI','MANUAL_TRIAGE_CLOSE','MANUAL_TRIAGE_CLOSURE','RESOLVE_ESCALATION')",
+            "action_taken IN ('APPROVE','OVERRIDE','ESCALATE','RETRY_AI','MANUAL_TRIAGE_CLOSURE','RESOLVE_ESCALATION')",
             name="ck_audit_action_taken",
         ),
     )

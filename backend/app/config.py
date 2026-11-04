@@ -13,10 +13,10 @@ class Settings(BaseSettings):
     )
 
     DATABASE_URL: str = (
-        "postgresql+psycopg://sentrax:sentrax2026@localhost:5432/sentrax_db"
+        "postgresql+psycopg://sentrax:sentrax@localhost:5432/sentrax"
     )
     DATABASE_URL_ASYNC: str = (
-        "postgresql+psycopg_async://sentrax:sentrax2026@localhost:5432/sentrax_db"
+        "postgresql+psycopg_async://sentrax:sentrax@localhost:5432/sentrax"
     )
     SECRET_KEY: str = "change-me-in-production"
     ALGORITHM: str = "HS256"

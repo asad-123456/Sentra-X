@@ -19,25 +19,6 @@ interface EvidenceTreePaneProps {
 
 type EvidenceTab = 'tree' | 'raw_json' | 'prompt_envelope';
 
-// Dot-notation & bracket-index key resolver matching backend/app/services/evidence_assembler.py
-const TOKEN = /([^.[\]]+)|\[(\d+)\]/g;
-
-export function resolveKey(pack: unknown, key: string): unknown | undefined {
-  let cur: unknown = pack;
-  for (const m of key.matchAll(TOKEN)) {
-    const [, name, index] = m;
-    if (name !== undefined) {
-      if (cur === null || typeof cur !== 'object' || Array.isArray(cur) || !(name in (cur as Record<string, unknown>))) return undefined;
-      cur = (cur as Record<string, unknown>)[name];
-    } else {
-      const i = Number(index);
-      if (!Array.isArray(cur) || i >= cur.length) return undefined;
-      cur = (cur as unknown[])[i];
-    }
-  }
-  return cur;
-}
-
 export const EvidenceTreePane: React.FC<EvidenceTreePaneProps> = ({
   evidencePack,
   citedEvidenceKeys,

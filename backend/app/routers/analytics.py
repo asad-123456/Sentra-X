@@ -28,21 +28,31 @@ def verify_analytics_access(
     auth: Optional[HTTPAuthorizationCredentials] = Depends(security),
 ) -> None:
     """Enforces AC-14 / FR-7: Analyst role receives HTTP 403 Forbidden on analytics."""
-    if auth and auth.credentials:
-        try:
-            token_payload = jwt.decode(
-                auth.credentials, settings.SECRET_KEY, algorithms=[settings.ALGORITHM]
+    if not auth or not auth.credentials:
+        if settings.DEMO_MODE:
+            return
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="HTTP 401 Unauthorized: Authentication credentials required.",
+        )
+    try:
+        token_payload = jwt.decode(
+            auth.credentials, settings.SECRET_KEY, algorithms=[settings.ALGORITHM]
+        )
+        role = token_payload.get("role")
+        if role == "Analyst":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="HTTP 403 Forbidden: Analyst role is prohibited from accessing Team Lead analytics (AC-14, FR-7).",
             )
-            role = token_payload.get("role")
-            if role == "Analyst":
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail="HTTP 403 Forbidden: Analyst role is prohibited from accessing Team Lead analytics (AC-14, FR-7).",
-                )
-        except HTTPException:
-            raise
-        except Exception:
-            pass
+    except HTTPException:
+        raise
+    except Exception as exc:
+        if not settings.DEMO_MODE:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="HTTP 401 Unauthorized: Invalid or expired authentication token.",
+            ) from exc
 
 
 @router.get("", response_model=Dict[str, Any])

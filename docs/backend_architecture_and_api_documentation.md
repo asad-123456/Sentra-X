@@ -95,50 +95,70 @@ Sentra-X is an evidence-grounded, uncertainty-aware decision-support copilot bui
 c:\projects\SentraX\backend\
 ├── alembic/
 │   ├── versions/
-│   │   └── 0001_initial_schema.py    # Authoritative 7-table DDL, 8 indexes, and immutability trigger
-│   └── env.py                        # Synchronous Alembic environment referencing pydantic-settings
-├── alembic.ini                       # Alembic CLI configuration (sys.path and logging)
+│   │   ├── 0001_initial_schema.py            # Authoritative 7-table DDL, 8 indexes, and immutability trigger
+│   │   ├── 0002_align_srs_v14.py             # SRS v1.4 column alignments & revocation tracking
+│   │   ├── 0003_add_srs_check_constraints.py # Enforces all 12 SRS check constraints & FK relations
+│   │   └── 0004_add_system_configurations.py # Provisions system_configurations table for multi-worker persistence
+│   └── env.py                                # Synchronous Alembic environment referencing pydantic-settings
+├── alembic.ini                               # Alembic CLI configuration (sys.path and logging)
 ├── app/
 │   ├── __init__.py
-│   ├── config.py                     # Pydantic BaseSettings loading from .env
-│   ├── database.py                   # Sync & Async SQLAlchemy 2.0 sessionmakers
-│   ├── auth.py                       # Bcrypt password hashing and JWT token generator/guard
-│   ├── demo_seed.json                # Authentic exported SOC telemetry dataset (34 KB)
-│   ├── seed_data.py                  # Idempotent database seeder (populating all 7 tables)
-│   ├── main.py                       # FastAPI application factory, CORS middleware, router mounts
-│   ├── models/                       # SQLAlchemy 2.0 Declarative Models
+│   ├── config.py                             # Pydantic BaseSettings loading from .env
+│   ├── database.py                           # Sync & Async SQLAlchemy 2.0 sessionmakers
+│   ├── auth.py                               # Bcrypt password hashing, JWT token generator, sliding rate-guard
+│   ├── utils.py                              # Centralized parse_uuid utility function
+│   ├── demo_seed.json                        # Authentic exported SOC telemetry dataset (34 KB)
+│   ├── seed_data.py                          # Idempotent database seeder (populating all 8 tables)
+│   ├── main.py                               # FastAPI application factory, CORS, exception handler, health check
+│   ├── models/                               # SQLAlchemy 2.0 Declarative Models
 │   │   ├── __init__.py
-│   │   ├── base.py                   # DeclarativeBase
-│   │   ├── user.py                   # User account & RBAC role entity
-│   │   ├── asset.py                  # Monitored Wazuh agent & criticality tier entity
-│   │   ├── alert.py                  # Security alert entity (Wazuh event 1-to-1)
-│   │   ├── evidence_pack.py          # Grounded Evidence Pack & valid dot keys
-│   │   ├── ai_assessment.py          # LLM raw and effective guardrailed assessment
-│   │   ├── audit.py                  # Append-only immutable analyst decision audit trail
-│   │   └── exemplar.py               # Human override feedback calibration exemplar
-│   ├── schemas/                      # Pydantic v2 Contract DTOs (100% TypeScript Match)
+│   │   ├── base.py                           # DeclarativeBase
+│   │   ├── user.py                           # User account & RBAC role entity
+│   │   ├── asset.py                          # Monitored Wazuh agent & criticality tier entity
+│   │   ├── alert.py                          # Security alert entity (Wazuh event 1-to-1)
+│   │   ├── evidence_pack.py                  # Grounded Evidence Pack & valid dot keys
+│   │   ├── ai_assessment.py                  # LLM raw and effective guardrailed assessment
+│   │   ├── audit.py                          # Append-only immutable analyst decision audit trail
+│   │   ├── exemplar.py                       # Human override feedback calibration exemplar
+│   │   └── system_configuration.py           # Thread-safe persistent system configuration entity
+│   ├── schemas/                              # Pydantic v2 Contract DTOs (100% TypeScript Match)
 │   │   ├── __init__.py
-│   │   ├── common.py                 # Enums: AlertStatus, Verdict, Severity, AssetCriticality
-│   │   ├── auth.py                   # LoginRequest, TokenResponse, UserDTO
-│   │   ├── queue.py                  # AlertQueueItem, QueueStatsDTO, PaginatedQueueResponse
-│   │   ├── alert_detail.py           # AlertDetailDTO, EvidencePackDTO, AIAssessmentDTO
-│   │   ├── decision.py               # DecisionRequestDTO (with >=10 char validation), Response
-│   │   ├── analytics.py              # AnalyticsSummaryDTO, AgreementMatrix, OverrideTrendPoint
-│   │   ├── governance.py             # ExemplarCreateRequest, AssetRegistryItem, AssetRegisterRequest
-│   │   └── evaluation.py             # EvaluationReport, BenchmarkComparativeScorecard, Payload
-│   └── routers/                      # REST API Endpoints
+│   │   ├── common.py                         # Enums: AlertStatus, Verdict, Severity, AssetCriticality
+│   │   ├── auth.py                           # LoginRequest, TokenResponse, UserDTO
+│   │   ├── queue.py                          # AlertQueueItem, QueueStatsDTO, PaginatedQueueResponse
+│   │   ├── alert_detail.py                   # AlertDetailDTO, EvidencePackDTO, AIAssessmentDTO
+│   │   ├── decision.py                       # DecisionRequestDTO (with >=10 char validation), Response
+│   │   ├── analytics.py                      # AnalyticsSummaryDTO, AgreementMatrix, OverrideTrendPoint
+│   │   ├── governance.py                     # ExemplarCreateRequest, AssetRegistryItem, AssetRegisterRequest
+│   │   └── evaluation.py                     # EvaluationReport, BenchmarkComparativeScorecard, Payload
+│   ├── services/                             # Core AI Pipeline & Guardrail Services (WP-3 / WP-4)
+│   │   ├── __init__.py
+│   │   ├── prompt_sanitizer.py               # NFKC normalization, invisible char stripping, delimiter isolation
+│   │   ├── evidence_assembler.py             # Grounded dot-notation key extraction, temporal context K=5
+│   │   ├── rules_engine.py                   # Deterministic baseline mapping, abstention, dual-tier safety floor
+│   │   ├── llm_adapter.py                    # Swappable LLM adapters (Gemini, Claude, Mock) with retry backoff
+│   │   ├── triage_schema.py                  # Strict LLMTriageOutput Pydantic schema
+│   │   └── evaluation_runner.py              # Adversarial benchmark & baseline comparison runner
+│   └── routers/                              # REST API Endpoints (24 Endpoints)
 │       ├── __init__.py
-│       ├── auth.py                   # /api/v1/auth (Login, Me)
-│       ├── alerts.py                 # /api/v1/alerts (Queue, Counts, Detail, Decision submission)
-│       ├── analytics.py              # /api/v1/analytics (KPIs, Trends, Streaming CSV)
-│       ├── governance.py             # /api/v1/governance (Exemplars toggle, Assets CRUD)
-│       ├── evaluation.py             # /api/v1/evaluation (Suite, Report, Benchmark runner)
-│       └── admin.py                  # /api/v1/admin (User management, System config)
+│       ├── auth.py                           # /api/v1/auth (Login, Me)
+│       ├── alerts.py                         # /api/v1/alerts (Queue, Counts, Detail, Decision submission)
+│       ├── analytics.py                      # /api/v1/analytics (KPIs, Trends, Streaming CSV)
+│       ├── governance.py                     # /api/v1/governance (Exemplars toggle, Assets CRUD)
+│       ├── evaluation.py                     # /api/v1/evaluation (Suite, Report, Benchmark runner)
+│       └── admin.py                          # /api/v1/admin (User management, System config)
+├── scripts/
+│   ├── reset_db.py                           # Truncates tables & re-seeds baseline for demonstration
+│   └── wipe_db.py                            # Safe schema-preserving database purge
 ├── tests/
-│   ├── test_db_schema.py             # Verifies 7 tables, 8 indexes, and asserts trigger blocks UPDATE/DELETE
-│   └── test_api_endpoints.py         # 16 automated integration tests covering all 21 REST endpoints
-├── requirements.txt                  # Production backend dependencies
-└── .env                              # Active environment configuration
+│   ├── test_db_schema.py                     # Verifies 7 tables, 8 indexes, 12 constraints & immutability trigger
+│   ├── test_api_endpoints.py                 # 16 automated integration tests covering REST endpoints & RBAC
+│   ├── test_evidence_assembler.py            # Unit tests for evidence pack dot-key extraction & correlation
+│   ├── test_prompt_sanitizer.py              # Unit tests for prompt injection neutralization & role delimiters
+│   ├── test_rules_engine.py                  # Unit tests for deterministic guardrails & safety floors
+│   └── test_llm_adapter.py                   # Unit tests for LLM provider transport & Pydantic output parsing
+├── requirements.txt                          # Production backend dependencies
+└── .env                                      # Active environment configuration
 ```
 
 ---
@@ -250,8 +270,8 @@ classDiagram
     }
 
     Asset "1" --> "0..*" Alert : generates
-    Alert "1" --> "1" EvidencePack : compiles_into
-    Alert "1" --> "1" AIAssessment : evaluates_to
+    Alert "1" --> "0..1" EvidencePack : compiles_into
+    Alert "1" --> "0..1" AIAssessment : evaluates_to
     Alert "1" --> "0..*" AnalystDecisionAudit : dispositioned_in
     Alert "1" --> "0..*" FeedbackExemplar : calibrates
     User "1" --> "0..*" AnalystDecisionAudit : executes
@@ -483,7 +503,7 @@ All endpoints are mounted with prefix `/api/v1` and support Bearer JWT authentic
     "user_id": "b7f66165-629e-5068-84f8-c521b7d95887"
   }
   ```
-* **Supported Actions:** `APPROVE`, `OVERRIDE`, `ESCALATE`, `RETRY_AI`, `MANUAL_TRIAGE_CLOSE`, `RESOLVE_ESCALATION`.
+* **Supported Actions:** `APPROVE`, `OVERRIDE`, `ESCALATE`, `RETRY_AI`, `MANUAL_TRIAGE_CLOSURE`, `RESOLVE_ESCALATION`.
 * **Response (HTTP 200 — `AnalystDecisionAudit`):**
   ```json
   {
@@ -653,7 +673,7 @@ All endpoints are mounted with prefix `/api/v1` and support Bearer JWT authentic
     "polling_interval_seconds": 30,
     "min_rule_level": 4,
     "llm_provider": "Gemini",
-    "model_name": "gemini-2.5-flash",
+    "model_name": "gemini-3.1-flash-lite",
     "abstention_threshold": 0.6,
     "max_exemplars_injected": 2
   }

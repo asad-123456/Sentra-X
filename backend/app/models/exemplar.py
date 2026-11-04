@@ -50,7 +50,7 @@ class FeedbackExemplar(Base):
         nullable=True,
     )
     rule_id: Mapped[str] = mapped_column(String(32), nullable=False)
-    process_signature: Mapped[str] = mapped_column(Text, nullable=False)
+    process_signature: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     # CHECK: LOW | MEDIUM | HIGH | CRITICAL
     asset_criticality: Mapped[str] = mapped_column(String(16), nullable=False)
     # CHECK: TRUE_POSITIVE | FALSE_POSITIVE
@@ -67,6 +67,8 @@ class FeedbackExemplar(Base):
         nullable=False,
         server_default=text("0"),
     )
+    # Canonical author column per SRS v1.4 §7.2.1 Data Dictionary.
+    # Note: DB trigger trg_sync_feedback_exemplar_user automatically synchronizes user_id and created_by.
     user_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("users.id", ondelete="SET NULL"),

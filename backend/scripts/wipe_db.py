@@ -13,9 +13,11 @@ if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
 from sqlalchemy import text
+from app.config import settings
 from app.database import sync_engine
 
 TABLES_IN_TRUNCATE_ORDER = [
+    "system_configurations",
     "analyst_decisions_audit",
     "feedback_exemplars",
     "ai_assessments",
@@ -26,6 +28,28 @@ TABLES_IN_TRUNCATE_ORDER = [
 ]
 
 
+def _assert_safe_dev_environment() -> None:
+    """Enforces that destructive wipes only run on local demonstration / test databases."""
+    if not getattr(settings, "DEMO_MODE", False):
+        raise RuntimeError(
+            "CRITICAL SAFEGUARD: Database wipe refused. DEMO_MODE is not True in application settings."
+        )
+
+    host = sync_engine.url.host
+    safe_hosts = ("localhost", "127.0.0.1", "::1", None)
+    if host not in safe_hosts and not (host and host.endswith(".internal")):
+        raise RuntimeError(
+            f"CRITICAL SAFEGUARD: Database wipe refused. Host {host!r} is not an authorized local dev host."
+        )
+
+    db_name = sync_engine.url.database
+    safe_dbs = ("sentrax", "sentrax_db", "test_db", "sentrax_test")
+    if db_name not in safe_dbs:
+        raise RuntimeError(
+            f"CRITICAL SAFEGUARD: Database wipe refused. Target database {db_name!r} is not an authorized dev database."
+        )
+
+
 def wipe_database(verbose: bool = True) -> bool:
     """Safely wipes all mock/telemetry data from PostgreSQL.
     
@@ -34,6 +58,7 @@ def wipe_database(verbose: bool = True) -> bool:
     - Resets serial identity sequences (e.g. feedback_exemplars.id).
     - Preserves all tables, constraints, indexes, triggers, and Alembic version history.
     """
+    _assert_safe_dev_environment()
     if verbose:
         print("=" * 70)
         print("SENTRA-X DATABASE PURGE: WIPING ALL TELEMETRY & AUDIT DATA")

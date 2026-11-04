@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from typing import Optional
+from typing import Any, Optional
 from uuid import UUID
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from .common import DecisionAction, Severity, Verdict
 
@@ -15,12 +15,18 @@ class DecisionRequestDTO(BaseModel):
     rationale: str = Field(default="")
     user_id: UUID
 
+    @field_validator("action", mode="before")
+    @classmethod
+    def normalize_action(cls, v: Any) -> Any:
+        if v == "MANUAL_TRIAGE_CLOSE":
+            return DecisionAction.MANUAL_TRIAGE_CLOSURE
+        return v
+
     @model_validator(mode="after")
     def validate_override_rationale(self) -> DecisionRequestDTO:
         clean_rationale = (self.rationale or "").strip()
         if self.action in (
             DecisionAction.OVERRIDE,
-            DecisionAction.MANUAL_TRIAGE_CLOSE,
             DecisionAction.MANUAL_TRIAGE_CLOSURE,
             DecisionAction.RESOLVE_ESCALATION,
         ):

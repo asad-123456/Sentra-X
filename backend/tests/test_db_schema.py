@@ -18,13 +18,13 @@ from sqlalchemy import text
 from app.database import SyncSessionLocal, sync_engine
 
 
-def test_schema_and_immutability_trigger():
+def run_db_schema_tests():
     print("=" * 70)
     print("SENTRA-X POSTGRESQL 16 SCHEMA & IMMUTABILITY TRIGGER TEST (SRS v1.4)")
     print("=" * 70)
 
     with SyncSessionLocal() as session:
-        # 1. Verify all 7 tables exist in information_schema
+        # 1. Verify all 8 tables exist in information_schema
         expected_tables = {
             "users",
             "assets",
@@ -33,6 +33,7 @@ def test_schema_and_immutability_trigger():
             "ai_assessments",
             "analyst_decisions_audit",
             "feedback_exemplars",
+            "system_configurations",
         }
         res = session.execute(
             text(
@@ -75,7 +76,8 @@ def test_schema_and_immutability_trigger():
         expected_indexes = {
             "ix_exemplars_retrieval",
             "ix_alerts_queue_priority",
-            "ix_alerts_agent_src_ts",
+            "ix_alerts_agent_timestamp",
+            "ix_alerts_src_ip_timestamp",
             "ix_ai_assessments_alert_id",
             "ix_evidence_packs_alert_id",
             "ix_audit_alert_id",
@@ -184,9 +186,14 @@ def test_schema_and_immutability_trigger():
         print("\n" + "=" * 70)
         print("🎯 ALL POSTGRESQL 16 SCHEMA, SRS v1.4 PARITY & TRIGGER TESTS PASSED!")
         print("=" * 70)
+        return True
+
+
+def test_schema_and_immutability_trigger():
+    assert run_db_schema_tests() is True
 
 
 if __name__ == "__main__":
-    success = test_schema_and_immutability_trigger()
+    success = run_db_schema_tests()
     if not success:
         sys.exit(1)

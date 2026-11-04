@@ -32,7 +32,6 @@ export type DecisionAction =
   | 'OVERRIDE'
   | 'ESCALATE'
   | 'RETRY_AI'
-  | 'MANUAL_TRIAGE_CLOSE'
   | 'MANUAL_TRIAGE_CLOSURE'
   | 'RESOLVE_ESCALATION';
 

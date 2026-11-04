@@ -25,6 +25,7 @@ EXPECTED_COUNTS = {
     "ai_assessments": 12,
     "analyst_decisions_audit": 3,
     "feedback_exemplars": 4,
+    "system_configurations": 1,
 }
 
 

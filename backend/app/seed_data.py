@@ -223,7 +223,7 @@ def seed_database():
                 "alert_metadata.rule.description",
                 "telemetry_payload.data.win.eventdata.TargetImage",
                 "telemetry_payload.data.win.eventdata.GrantedAccess",
-                "telemetry_payload.data.win.eventdata.CommandLine",
+                "telemetry_payload.data.win.eventdata.commandLine",
                 "telemetry_payload.data.win.eventdata.SourceImage",
                 "telemetry_payload.full_log",
             ]
@@ -303,7 +303,7 @@ def seed_database():
                     "abstention_triggered": ai.get("abstention_triggered", False),
                     "guardrail_audit_note": ai.get("guardrail_audit_note"),
                     "llm_provider": ai.get("llm_provider", "Gemini"),
-                    "model_name": ai.get("model_name", "gemini-2.5-flash"),
+                    "model_name": ai.get("model_name", "gemini-3.1-flash-lite"),
                     "latency_ms": latency,
                     "inference_latency_ms": latency,
                     "retry_count": ai.get("retry_count", 0),
@@ -359,6 +359,34 @@ def seed_database():
                     },
                 )
                 print(f"  -> Audit Row: {aud['id']} for alert {a_str_id} [{aud.get('action_taken')}]")
+
+        # 7. Seed System Configuration (Multi-Worker Persistence)
+        print("\n[7/7] Seeding System Configuration (Multi-Worker Persistence)...")
+        session.execute(
+            text(
+                """
+                INSERT INTO system_configurations (
+                    id, wazuh_endpoint, wazuh_status, polling_interval_seconds, min_rule_level,
+                    llm_provider, model_name, abstention_threshold, max_exemplars_injected,
+                    last_sync_timestamp, updated_at
+                ) VALUES (
+                    1,
+                    'https://wazuh-master.sentrax.internal:55000',
+                    'CONNECTED',
+                    30,
+                    4,
+                    'Gemini',
+                    'gemini-3.1-flash-lite',
+                    0.6,
+                    2,
+                    NOW(),
+                    NOW()
+                ) ON CONFLICT (id) DO UPDATE
+                SET updated_at = NOW();
+                """
+            )
+        )
+        print("  -> System Configuration Singleton Initialized (ID: 1)")
 
         session.commit()
 

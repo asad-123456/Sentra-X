@@ -338,7 +338,7 @@ flowchart TB
   * `OVERRIDE` (`AWAITING_ANALYST`): Requires alternate verdict/severity and rationale $\ge 10$ chars $\to$ `status = CLOSED`, creates `feedback_exemplar`.
   * `ESCALATE` (`AWAITING_ANALYST` or `NEEDS_MANUAL_TRIAGE`): $\to$ `status = ESCALATED`.
   * `RETRY_AI` (`NEEDS_MANUAL_TRIAGE`): Resets retry count to 0 $\to$ `status = PENDING_REVIEW`.
-  * `MANUAL_TRIAGE_CLOSE` (`NEEDS_MANUAL_TRIAGE`): Requires manual verdict, severity, and rationale $\ge 10$ chars $\to$ `status = CLOSED`.
+  * `MANUAL_TRIAGE_CLOSURE` (`NEEDS_MANUAL_TRIAGE`): Requires manual verdict, severity, and rationale $\ge 10$ chars $\to$ `status = CLOSED`.
   * `RESOLVE_ESCALATION` (`ESCALATED` — Team Lead only): Requires authoritative verdict, severity, and rationale $\ge 10$ chars $\to$ `status = CLOSED`.
 
 ### 3.8 Subsystem 8: Agreement Analytics & Streaming CSV Exporter (`FR-7`)
@@ -765,7 +765,7 @@ stateDiagram-v2
 | `AWAITING_ANALYST`| `OVERRIDE` | Analyst, Lead | `CLOSED` | Requires rationale $\ge 10$ chars; generates active `feedback_exemplars` row. |
 | `AWAITING_ANALYST`| `ESCALATE` | Analyst | `ESCALATED` | Routes incident to Team Lead queue; creates audit log entry. |
 | `NEEDS_MANUAL_TRIAGE`| `RETRY_AI` | Analyst, Lead | `PENDING_REVIEW` | Resets `alerts.retry_count = 0`; triggers dual-upsert on next evaluation. |
-| `NEEDS_MANUAL_TRIAGE`| `MANUAL_TRIAGE_CLOSE` | Analyst, Lead | `CLOSED` | Requires manual severity, verdict, and rationale $\ge 10$ chars. |
+| `NEEDS_MANUAL_TRIAGE`| `MANUAL_TRIAGE_CLOSURE` | Analyst, Lead | `CLOSED` | Requires manual severity, verdict, and rationale $\ge 10$ chars. |
 | `ESCALATED` | `RESOLVE_ESCALATION`| TeamLead only | `CLOSED` | Authoritative verdict & rationale $\ge 10$ chars; Analyst blocked with HTTP 403. |
 | `CLOSED` | Any Write Action | None | Blocked | Terminal state. PostgreSQL trigger prohibits updates or deletes. |
 
@@ -924,8 +924,8 @@ Stores LLM inference evaluations alongside post-guardrail effective dispositions
 | `safety_floor_triggered`| `BOOLEAN`| No | `DEFAULT FALSE` | True if raw downgrade was blocked on high/critical alert (`rule_level ≥ 10`). |
 | `abstention_triggered`| `BOOLEAN`| No | `DEFAULT FALSE` | True if confidence $< 0.60$, citations were empty/invalid, or contradiction occurred. |
 | `guardrail_audit_note`| `TEXT` | Yes | None | Explanatory note detailing which deterministic rule intervened. |
-| `llm_provider` | `VARCHAR(32)` | Yes | None | Active adapter provider (`gemini` or `claude`). |
-| `model_name` | `VARCHAR(64)` | Yes | None | Specific LLM model identifier (e.g. `gemini-2.5-flash`). Populated upon model initialization. |
+| `llm_provider` | `VARCHAR(32)` | Yes | None | Active adapter provider (`gemini`, `claude`, or `mock`). |
+| `model_name` | `VARCHAR(64)` | Yes | None | Specific LLM model identifier (e.g. `gemini-3.1-flash-lite`). Populated upon model initialization. |
 | `inference_latency_ms`| `INTEGER` | Yes | None | Outbound LLM API round-trip inference latency in milliseconds (SRS v1.4 §7.2.1). |
 | `latency_ms` | `INTEGER` | Yes | Alias: `inference_latency_ms` | Legacy round-trip latency column maintained for backward compatibility. |
 | `retry_count` | `SMALLINT` | No | `DEFAULT 0`, `CHECK (retry_count BETWEEN 0 AND 3)` | Automated API retry attempts (times out after 3 retries $\to$ `NEEDS_MANUAL_TRIAGE`). |
@@ -933,14 +933,14 @@ Stores LLM inference evaluations alongside post-guardrail effective dispositions
 | `updated_at` | `TIMESTAMPTZ` | No | `DEFAULT NOW()` | Assessment update timestamp (refreshed on `Retry AI` upsert per ADR 8.5). |
 
 #### 5.2.6 Table: `analyst_decisions_audit` (Immutable Tamper-Evident Log)
-Append-only legal audit log of all human dispositions (`FR-6`, `NFR-4`, SOC 2 / ISO 27001).
+Append-only audit log of all human dispositions (`FR-6`, `NFR-4`, aligned with SOC 2 CC6.8 and ISO 27001 A.12.4.1 principles).
 
 | Column Name | SQL Type | Nullable | Default / Constraints | Operational Purpose |
 | :--- | :--- | :---: | :--- | :--- |
 | `id` | `UUID` | No | `PRIMARY KEY`, `DEFAULT gen_random_uuid()` | Immutable Audit Record identifier. |
 | `alert_id` | `UUID` | No | `FOREIGN KEY (alert_id) REFERENCES alerts(id) ON DELETE RESTRICT` | Referenced alert. Parent cannot be deleted while audit row exists. |
 | `user_id` | `UUID` | No | `FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE RESTRICT` | Authenticated user who performed the action (`FR-8`). |
-| `action_taken` | `VARCHAR(32)` | No | `CHECK (action_taken IN ('APPROVE', 'OVERRIDE', 'ESCALATE', 'RETRY_AI', 'MANUAL_TRIAGE_CLOSE', 'MANUAL_TRIAGE_CLOSURE', 'RESOLVE_ESCALATION'))` | Action verb recorded during triage. |
+| `action_taken` | `VARCHAR(32)` | No | `CHECK (action_taken IN ('APPROVE', 'OVERRIDE', 'ESCALATE', 'RETRY_AI', 'MANUAL_TRIAGE_CLOSURE', 'RESOLVE_ESCALATION'))` | Action verb recorded during triage. |
 | `previous_verdict`| `VARCHAR(32)`| Yes | None | Effective verdict before the human action was taken. |
 | `previous_severity`| `VARCHAR(16)`| Yes | None | Effective severity before the human action was taken. |
 | `final_verdict` | `VARCHAR(32)` | Yes | `NULL` for `ESCALATE` and `RETRY_AI` | Authoritative verdict recorded in audit trail. |
@@ -1014,7 +1014,7 @@ Audit integrity is enforced at the database kernel level through a PL/pgSQL trig
 CREATE OR REPLACE FUNCTION prevent_audit_modification()
 RETURNS TRIGGER AS $$
 BEGIN
-    RAISE EXCEPTION 'analyst_decisions_audit is append-only. UPDATE and DELETE operations are permanently prohibited on this table (FR-6, NFR-4, SOC 2 / ISO 27001 compliance).';
+    RAISE EXCEPTION 'analyst_decisions_audit is append-only. UPDATE and DELETE operations are permanently prohibited on this table (FR-6, NFR-4).';
     RETURN NULL;
 END;
 $$ LANGUAGE plpgsql;
@@ -1023,6 +1023,8 @@ CREATE TRIGGER trg_audit_immutability
 BEFORE UPDATE OR DELETE ON analyst_decisions_audit
 FOR EACH ROW EXECUTE FUNCTION prevent_audit_modification();
 ```
+
+*Note on TRUNCATE Operations:* PostgreSQL row-level triggers execute per-row and do not intercept table-level `TRUNCATE` operations. In production deployment, immutability against truncation is enforced by revoking `TRUNCATE` privileges on `analyst_decisions_audit` from the application database role (`REVOKE TRUNCATE ON analyst_decisions_audit FROM sentrax;`).
 
 ---
 
@@ -1067,7 +1069,7 @@ To ensure continuous integration testing against the actual PostgreSQL 18.6 inst
 | **Alerts** | `GET` | `/api/v1/alerts` | Authenticated | Query: `tab`, `search`, `severity`, `guardrail`, `assetTier`, `page`, `page_size` $\to$ Returns paginated items (with `explanation_snippet` & `truncated_explanation`). |
 | **Alerts** | `GET` | `/api/v1/alerts/counts` | Authenticated | Live counters: `awaiting`, `awaitingAnalystCount`, `needsManualTriageCount`, `escalated`, `closed`, `criticalSafetyFloor`, `abstentionWarnings`, `meanLatencySeconds`. |
 | **Alerts** | `GET` | `/api/v1/alerts/{id}` | Authenticated | Full normalized detail: `alert`, `asset`, `evidence_pack`, `assessment`/`ai_assessment`, `decision_audit_trail`/`audit_trail`, `injected_exemplars`/`relevant_exemplars`, `correlated_alerts`. |
-| **Alerts** | `POST` | `/api/v1/alerts/{id}/decision` | Authenticated | Submits decision action (`APPROVE`, `OVERRIDE`, `ESCALATE`, `RETRY_AI`, `MANUAL_TRIAGE_CLOSE`, `RESOLVE_ESCALATION`). Enforces $\ge 10$ char rationale on overrides. |
+| **Alerts** | `POST` | `/api/v1/alerts/{id}/decision` | Authenticated | Submits decision action (`APPROVE`, `OVERRIDE`, `ESCALATE`, `RETRY_AI`, `MANUAL_TRIAGE_CLOSURE`, `RESOLVE_ESCALATION`). Enforces $\ge 10$ char rationale on overrides. |
 | **Analytics**| `GET` | `/api/v1/analytics` | TeamLead, Admin | Query: `range` / `date_range` ($\le 90\text{d}$ per AC-14), optional `rule_id` $\to$ AI agreement rate, Cohen's Kappa, 2x2 matrix, override trendline. |
 | **Analytics**| `GET` | `/api/v1/analytics/export-csv` | TeamLead, Admin | Streaming download of `sentrax_audit_trail_YYYY-MM-DD.csv` formatted for SIEM forensic compliance. |
 | **Governance**| `GET` | `/api/v1/governance/exemplars` | TeamLead, Admin | Returns active & historical few-shot calibration exemplars. |

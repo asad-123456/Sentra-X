@@ -130,7 +130,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       } catch (err) {
         console.warn('Live switchDemoRole failed:', err);
         throw new Error(
-          `Live authentication failed for role '${role}'. Verify that the backend is running at ${import.meta.env.VITE_API_BASE_URL} and settings.DEMO_MODE is active.`
+          `Live authentication failed for role '${role}'. Verify that the backend is running at ${import.meta.env.VITE_API_BASE_URL} and settings.DEMO_MODE is active.`,
+          { cause: err }
         );
       }
     }

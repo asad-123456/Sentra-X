@@ -81,6 +81,11 @@ def toggle_exemplar_active(
     db: Session = Depends(get_db),
 ):
     caller = get_caller_user(auth, db)
+    if not caller and not settings.DEMO_MODE:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="HTTP 401 Unauthorized: Authentication credentials required.",
+        )
     if caller and caller.role == "Analyst":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -171,6 +176,11 @@ def update_asset_criticality(
     db: Session = Depends(get_db),
 ):
     caller = get_caller_user(auth, db)
+    if not caller and not settings.DEMO_MODE:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="HTTP 401 Unauthorized: Authentication credentials required.",
+        )
     if caller and caller.role == "Analyst":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -230,6 +240,11 @@ def register_asset(
     db: Session = Depends(get_db),
 ):
     caller = get_caller_user(auth, db)
+    if not caller and not settings.DEMO_MODE:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="HTTP 401 Unauthorized: Authentication credentials required.",
+        )
     if caller and caller.role != "Admin":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -237,11 +252,12 @@ def register_asset(
         )
     agent_id = str(payload.get("agent_id", "")).strip()
     hostname = str(payload.get("hostname", "")).strip()
-    ip_address = str(payload.get("ip_address", "")).strip()
+    ip_raw = payload.get("ip_address")
+    ip_address = str(ip_raw).strip() if ip_raw else None
     tier = payload.get("criticality_tier", "MEDIUM")
 
-    if not agent_id or not hostname or not ip_address:
-        raise HTTPException(status_code=400, detail="agent_id, hostname, and ip_address are required.")
+    if not agent_id or not hostname:
+        raise HTTPException(status_code=400, detail="agent_id and hostname are required.")
 
     existing = db.query(Asset).filter(Asset.agent_id == agent_id).first()
     if existing:

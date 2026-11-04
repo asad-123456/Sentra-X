@@ -39,7 +39,7 @@ class Asset(Base):
         primary_key=True,
     )
     hostname: Mapped[str] = mapped_column(String(255), nullable=False)
-    ip_address: Mapped[str] = mapped_column(String(45), nullable=False)
+    ip_address: Mapped[Optional[str]] = mapped_column(String(45), nullable=True)
     criticality_tier: Mapped[str] = mapped_column(
         String(16),
         nullable=False,

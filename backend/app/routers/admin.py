@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import logging
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -12,8 +14,11 @@ from sqlalchemy.orm import Session
 from ..auth import hash_password, security
 from ..config import settings
 from ..database import get_db
+from ..models.system_configuration import SystemConfiguration
 from ..models.user import User
 from ..utils import parse_uuid
+
+logger = logging.getLogger("sentrax.admin")
 
 router = APIRouter(prefix="/admin", tags=["Admin & System Configuration"])
 
@@ -23,21 +28,31 @@ def verify_admin_access(
     db: Session = Depends(get_db),
 ) -> None:
     """Enforces AC-16 (FR-8): non-Admin callers receive HTTP 403 Forbidden on user administration."""
-    if auth and auth.credentials:
-        try:
-            token_payload = jwt.decode(
-                auth.credentials, settings.SECRET_KEY, algorithms=[settings.ALGORITHM]
+    if not auth or not auth.credentials:
+        if settings.DEMO_MODE:
+            return
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="HTTP 401 Unauthorized: Authentication credentials required.",
+        )
+    try:
+        token_payload = jwt.decode(
+            auth.credentials, settings.SECRET_KEY, algorithms=[settings.ALGORITHM]
+        )
+        role = token_payload.get("role")
+        if role != "Admin":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="HTTP 403 Forbidden: Non-Admin callers are prohibited from administering users (AC-16, FR-8).",
             )
-            role = token_payload.get("role")
-            if role != "Admin":
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail="HTTP 403 Forbidden: Non-Admin callers are prohibited from administering users (AC-16, FR-8).",
-                )
-        except HTTPException:
-            raise
-        except Exception:
-            pass
+    except HTTPException:
+        raise
+    except Exception as exc:
+        if not settings.DEMO_MODE:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="HTTP 401 Unauthorized: Invalid or expired authentication token.",
+            ) from exc
 
 
 @router.get("/users", response_model=List[Dict[str, Any]])
@@ -162,15 +177,29 @@ DEFAULT_SYSTEM_CONFIG: Dict[str, Any] = {
     "polling_interval_seconds": 30,
     "min_rule_level": 4,
     "llm_provider": "Gemini",
-    "model_name": "gemini-2.5-flash",
+    "model_name": "gemini-3.1-flash-lite",
     "abstention_threshold": 0.6,
     "max_exemplars_injected": 2,
     "last_sync_timestamp": "2026-10-15T21:45:00Z",
 }
 
 
-def _load_system_config() -> Dict[str, Any]:
-    """Load configuration from JSON state file or fall back to default."""
+def _load_system_config(db: Optional[Session] = None) -> Dict[str, Any]:
+    """Load configuration from PostgreSQL table, with resilient disk/default fallback."""
+    if db:
+        try:
+            config_row = db.query(SystemConfiguration).first()
+            if config_row:
+                return config_row.to_dict()
+            # If table is empty, auto-seed default row
+            new_row = SystemConfiguration()
+            db.add(new_row)
+            db.commit()
+            db.refresh(new_row)
+            return new_row.to_dict()
+        except Exception as exc:
+            logger.warning("Database config query failed, falling back to disk cache: %s", exc)
+
     if CONFIG_FILE_PATH.exists():
         try:
             with open(CONFIG_FILE_PATH, "r", encoding="utf-8") as f:
@@ -183,13 +212,38 @@ def _load_system_config() -> Dict[str, Any]:
     return dict(DEFAULT_SYSTEM_CONFIG)
 
 
-def _save_system_config(config: Dict[str, Any]) -> None:
-    """Persist updated configuration to JSON state file."""
+def _save_system_config(payload: Dict[str, Any], db: Optional[Session] = None) -> Dict[str, Any]:
+    """Persist updated configuration to PostgreSQL and mirror to JSON state file."""
+    current = _load_system_config(db)
+    for k, v in payload.items():
+        if k in DEFAULT_SYSTEM_CONFIG:
+            current[k] = v
+            SYSTEM_CONFIG[k] = v
+
+    if db:
+        try:
+            config_row = db.query(SystemConfiguration).first()
+            if not config_row:
+                config_row = SystemConfiguration()
+                db.add(config_row)
+
+            for k, v in current.items():
+                if hasattr(config_row, k) and k != "id":
+                    setattr(config_row, k, v)
+            config_row.updated_at = datetime.now(timezone.utc)
+            db.commit()
+            db.refresh(config_row)
+            current = config_row.to_dict()
+        except Exception as exc:
+            logger.error("Failed to persist configuration to PostgreSQL: %s", exc)
+
     try:
         with open(CONFIG_FILE_PATH, "w", encoding="utf-8") as f:
-            json.dump(config, f, indent=2)
+            json.dump(current, f, indent=2)
     except Exception:
         pass
+
+    return current
 
 
 # Module-level alias for backward compatibility
@@ -197,20 +251,18 @@ SYSTEM_CONFIG = _load_system_config()
 
 
 @router.get("/config", response_model=Dict[str, Any])
-def get_system_config(_: None = Depends(verify_admin_access)):
-    return _load_system_config()
+def get_system_config(
+    _: None = Depends(verify_admin_access),
+    db: Session = Depends(get_db),
+):
+    return _load_system_config(db)
 
 
 @router.patch("/config", response_model=Dict[str, Any])
 def update_system_config(
     payload: Dict[str, Any],
     _: None = Depends(verify_admin_access),
+    db: Session = Depends(get_db),
 ):
-    current = _load_system_config()
-    for k, v in payload.items():
-        if k in DEFAULT_SYSTEM_CONFIG:
-            current[k] = v
-            SYSTEM_CONFIG[k] = v
-    _save_system_config(current)
-    return current
+    return _save_system_config(payload, db)
 

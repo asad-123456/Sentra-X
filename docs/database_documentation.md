@@ -38,8 +38,8 @@ To satisfy the functional requirements (`FR-1` through `FR-10`) and rigorous non
 
 1. **Local Data Boundary (§8.3, DR-10):** All raw Wazuh JSON payloads, Sysmon process executions, endpoint IPs, and analyst audit records remain strictly within the local PostgreSQL container. Only sanitized, prompt-isolated payloads are dispatched to external LLM APIs (Google Gemini / Anthropic Claude).
 2. **Relational Strictness & Domain Constraints (§5.7, DR-1, DR-3):** Severity scales, lifecycle states, user roles, and asset tiers are validated through database-level `CHECK` constraints, preventing corrupt or out-of-spec data from entering the storage layer.
-3. **Hardware-Enforced Immutability (§7.3, FR-6, NFR-4):** Historical decision records in `analyst_decisions_audit` are governed by a PostgreSQL PL/pgSQL `BEFORE UPDATE OR DELETE` trigger that raises an unrecoverable exception, making the audit log tamper-evident for SOC 2, ISO 27001, and PCI-DSS audits.
-4. **Sub-50ms Partial Indexing (§7.3, NFR-4):** In-context few-shot calibration queries operate against a filtered composite index (`WHERE is_active = TRUE`), achieving $< 10\text{ms}$ exemplar lookup without scanning revoked historical records.
+3. **Database Trigger-Enforced Immutability (§7.3, FR-6, NFR-4):** Historical decision records in `analyst_decisions_audit` are governed by a PostgreSQL PL/pgSQL `BEFORE UPDATE OR DELETE` trigger (`trg_audit_immutability`) that raises an unrecoverable exception, making the audit log tamper-evident in alignment with SOC 2 (CC6.8) and ISO 27001 (A.12.4.1) audit trail design principles. In production environments, `TRUNCATE` privileges are revoked from the application role.
+4. **Sub-50ms Partial Indexing (§7.3, NFR-4):** In-context few-shot calibration queries operate against a filtered composite index (`WHERE is_active = TRUE`), meeting the NFR-4 target of $< 50\text{ms}$ exemplar lookup without scanning revoked historical records.
 
 ---
 
@@ -55,8 +55,8 @@ erDiagram
     USERS ||--o{ FEEDBACK_EXEMPLARS : "revokes (revoked_by)"
     USERS ||--o{ ASSETS : "updates (updated_by)"
     ASSETS ||--o{ ALERTS : "generates (agent_id)"
-    ALERTS ||--|| EVIDENCE_PACKS : "assembled_into (alert_id)"
-    ALERTS ||--|| AI_ASSESSMENTS : "evaluated_by (alert_id)"
+    ALERTS ||--o| EVIDENCE_PACKS : "assembled_into (alert_id)"
+    ALERTS ||--o| AI_ASSESSMENTS : "evaluated_by (alert_id)"
     ALERTS ||--o{ ANALYST_DECISIONS_AUDIT : "dispositioned_by (alert_id)"
     ALERTS ||--o{ FEEDBACK_EXEMPLARS : "calibrates_from (source_alert_id)"
 
@@ -73,7 +73,7 @@ erDiagram
     ASSETS {
         varchar_64 agent_id PK "Wazuh Agent ID string (0-translation)"
         varchar_255 hostname "Machine hostname / FQDN"
-        varchar_45 ip_address "Static interface IP"
+        varchar_45 ip_address "Host IP (nullable for agents without IP)"
         varchar_16 criticality_tier "CHECK: LOW | MEDIUM | HIGH | CRITICAL"
         text description "Host business role"
         uuid updated_by FK "Modifying user (users.id)"
@@ -125,8 +125,8 @@ erDiagram
         boolean safety_floor_triggered "Default FALSE"
         boolean abstention_triggered "Default FALSE"
         text guardrail_audit_note "Deterministic rule explanation"
-        varchar_32 llm_provider "Active adapter: gemini | claude"
-        varchar_64 model_name "Model ID (e.g. gemini-2.5-flash)"
+        varchar_32 llm_provider "Active adapter: gemini | claude | mock"
+        varchar_64 model_name "Model ID (e.g. gemini-3.1-flash-lite)"
         integer inference_latency_ms "API latency (alias: latency_ms)"
         smallint retry_count "Default 0 (0 to 3 attempts)"
         timestamptz created_at "Default NOW()"
@@ -137,7 +137,7 @@ erDiagram
         uuid id PK "gen_random_uuid()"
         uuid alert_id FK "FK alerts(id) ON DELETE RESTRICT"
         uuid user_id FK "FK users(id) ON DELETE RESTRICT"
-        varchar_32 action_taken "CHECK: APPROVE | OVERRIDE | ESCALATE..."
+        varchar_32 action_taken "CHECK: APPROVE | OVERRIDE | ESCALATE | RETRY_AI | MANUAL_TRIAGE_CLOSURE | RESOLVE_ESCALATION"
         varchar_32 previous_verdict "Pre-decision verdict"
         varchar_16 previous_severity "Pre-decision severity"
         varchar_32 final_verdict "Post-decision authoritative verdict"
@@ -151,7 +151,7 @@ erDiagram
         integer id PK "SERIAL AUTOINCREMENT"
         uuid source_alert_id FK "FK alerts(id) ON DELETE SET NULL"
         varchar_32 rule_id "Targeted Wazuh rule ID"
-        text process_signature "Tier 1 matching key"
+        text process_signature "Tier 1 matching key (nullable for non-process alerts)"
         varchar_16 asset_criticality "Tier 2 matching key"
         varchar_32 calibrated_verdict "CHECK: TRUE_POSITIVE | FALSE_POSITIVE"
         varchar_16 calibrated_severity "CHECK: LOW | MEDIUM | HIGH | CRITICAL"
@@ -162,6 +162,20 @@ erDiagram
         uuid revoked_by FK "FK users(id) Team Lead who revoked"
         timestamptz revoked_at "Timestamp of revocation"
         timestamptz created_at "Default NOW()"
+    }
+
+    SYSTEM_CONFIGURATIONS {
+        integer id PK "Singleton ID (1)"
+        varchar_255 wazuh_endpoint "Wazuh API endpoint"
+        varchar_32 wazuh_status "CONNECTED | DEGRADED | OFFLINE"
+        integer polling_interval_seconds "Polling cadence (default 30)"
+        integer min_rule_level "Minimum rule level (default 4)"
+        varchar_32 llm_provider "Gemini | Claude | Mock"
+        varchar_64 model_name "Target model identifier"
+        float abstention_threshold "Uncertainty boundary (default 0.60)"
+        integer max_exemplars_injected "Max few-shot exemplars (default 2)"
+        timestamptz last_sync_timestamp "Last telemetry heartbeat"
+        timestamptz updated_at "Default NOW()"
     }
 ```
 
@@ -260,8 +274,8 @@ Stores LLM inference evaluations alongside post-guardrail effective dispositions
 | `safety_floor_triggered`| `BOOLEAN`| No | `DEFAULT FALSE` | True if raw downgrade was blocked on high/critical alert (`rule_level ≥ 10`). |
 | `abstention_triggered`| `BOOLEAN`| No | `DEFAULT FALSE` | True if confidence $< 0.60$, citations were empty/invalid, or contradiction occurred. |
 | `guardrail_audit_note`| `TEXT` | Yes | None | Explanatory note detailing which deterministic rule intervened. |
-| `llm_provider` | `VARCHAR(32)` | Yes | None | Active adapter provider (`gemini` or `claude`). |
-| `model_name` | `VARCHAR(64)` | No | None | Specific LLM model identifier (e.g. `gemini-2.5-flash`). |
+| `llm_provider` | `VARCHAR(32)` | Yes | None | Active adapter provider (`gemini`, `claude`, or `mock`). |
+| `model_name` | `VARCHAR(64)` | No | None | Specific LLM model identifier (e.g. `gemini-3.1-flash-lite`). |
 | `inference_latency_ms`| `INTEGER` | No | Alias: `latency_ms` | Outbound LLM API round-trip inference latency in milliseconds. |
 | `retry_count` | `SMALLINT` | No | `DEFAULT 0`, `CHECK (retry_count BETWEEN 0 AND 3)` | Automated API retry attempts (times out after 3 retries $\to$ `NEEDS_MANUAL_TRIAGE`). |
 | `created_at` | `TIMESTAMPTZ` | No | `DEFAULT NOW()` | Initial assessment creation timestamp. |
@@ -277,7 +291,7 @@ Append-only legal audit log of all human dispositions (`FR-6`, `NFR-4`, SOC 2 / 
 | `id` | `UUID` | No | `PRIMARY KEY`, `DEFAULT gen_random_uuid()` | Immutable Audit Record identifier. |
 | `alert_id` | `UUID` | No | `FOREIGN KEY (alert_id) REFERENCES alerts(id) ON DELETE RESTRICT` | Referenced alert. Parent cannot be deleted while audit row exists. |
 | `user_id` | `UUID` | No | `FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE RESTRICT` | Authenticated user who performed the action (`FR-8`). |
-| `action_taken` | `VARCHAR(32)` | No | `CHECK (action_taken IN ('APPROVE', 'OVERRIDE', 'ESCALATE', 'RETRY_AI', 'MANUAL_TRIAGE_CLOSE', 'MANUAL_TRIAGE_CLOSURE', 'RESOLVE_ESCALATION'))` | Action verb recorded during triage. |
+| `action_taken` | `VARCHAR(32)` | No | `CHECK (action_taken IN ('APPROVE', 'OVERRIDE', 'ESCALATE', 'RETRY_AI', 'MANUAL_TRIAGE_CLOSURE', 'RESOLVE_ESCALATION'))` | Action verb recorded during triage. |
 | `previous_verdict`| `VARCHAR(32)`| Yes | None | Effective verdict before the human action was taken. |
 | `previous_severity`| `VARCHAR(16)`| Yes | None | Effective severity before the human action was taken. |
 | `final_verdict` | `VARCHAR(32)` | Yes | `NULL` for `ESCALATE` and `RETRY_AI` | Authoritative verdict recorded in audit trail. |
@@ -319,13 +333,14 @@ To satisfy the non-functional latency targets (`NFR-4: < 50ms lookup` and `NFR-5
 
 | Index Name | Target Table | Indexed Columns / Definition | Target Requirement & Latency Impact |
 | :--- | :--- | :--- | :--- |
-| `uq_alerts_wazuh_alert_id` | `alerts` | `UNIQUE (wazuh_alert_id)` | $O(1)$ deduplication during Wazuh polling (`FR-1`). Drops incoming duplicates in $< 1\text{ms}$. |
-| `ix_alerts_queue_priority` | `alerts` | `(status, rule_level DESC, ingested_at ASC)` | High-speed Analyst Queue sorting (`FR-5`). Delivers 10-row paginated slices in $< 5\text{ms}$ under 100k rows. |
-| `ix_alerts_agent_src_ts` | `alerts` | `(agent_id, src_ip, ingested_at DESC)` | 24-hour lookback correlation (`FR-2`). Assembles $K=5$ correlated host events in $< 15\text{ms}$. |
-| `ix_exemplars_retrieval` | `feedback_exemplars` | `(rule_id, asset_criticality, created_at DESC) WHERE is_active = TRUE` | **Partial Composite Index (`NFR-4`):** Retrieves the top 2 active few-shot exemplars in $< 8\text{ms}$, completely bypassing inactive rows. |
+| `uq_alerts_wazuh_alert_id` | `alerts` | `UNIQUE (wazuh_alert_id)` | $O(1)$ deduplication during Wazuh polling (`FR-1`). Ensures idempotent alert ingestion. |
+| `ix_alerts_queue_priority` | `alerts` | `(status, ingested_at ASC)` | High-speed Analyst Queue sorting (`FR-5`). Delivers paginated slices meeting the `< 50ms` UI responsiveness target. |
+| `ix_alerts_agent_timestamp` | `alerts` | `(agent_id, alert_timestamp DESC)` | 24-hour lookback correlation by agent (`FR-2`). Enables efficient index scans within correlation windows. |
+| `ix_alerts_src_ip_timestamp` | `alerts` | `(src_ip, alert_timestamp DESC) WHERE src_ip IS NOT NULL` | 24-hour lookback correlation by source IP (`FR-2`). Supports BitmapOr planning with agent index. |
+| `ix_exemplars_retrieval` | `feedback_exemplars` | `(rule_id, asset_criticality, created_at DESC) WHERE is_active = TRUE` | **Partial Composite Index (`NFR-4`):** Retrieves the top 2 active few-shot exemplars, meeting `< 50ms` SLA. |
 | `ix_ai_assessments_alert_id`| `ai_assessments`| `(alert_id)` | Foreign key reverse lookup for alert detail modal assembly (`FR-5`). |
 | `ix_evidence_packs_alert_id`| `evidence_packs`| `(alert_id)` | Foreign key reverse lookup for evidence tree retrieval. |
-| `ix_audit_alert_id` | `analyst_decisions_audit`| `(alert_id)` | Renders historical audit timeline in modal footer in $< 5\text{ms}$. |
+| `ix_audit_alert_id` | `analyst_decisions_audit`| `(alert_id)` | Fast lookup for historical audit timeline in modal footer. |
 | `ix_audit_user_id` | `analyst_decisions_audit`| `(user_id)` | Aggregates per-analyst performance and agreement rates (`FR-7`). |
 
 ---
@@ -373,9 +388,13 @@ FOR EACH ROW EXECUTE FUNCTION prevent_audit_modification();
 When any client or backend thread issues an `UPDATE` or `DELETE` against `analyst_decisions_audit`, PostgreSQL terminates the transaction with code `P0001` (RaiseException):
 
 ```text
-ERROR:  analyst_decisions_audit is append-only. UPDATE and DELETE operations are permanently prohibited on this table (FR-6, NFR-4, SOC 2 / ISO 27001 compliance).
+ERROR:  analyst_decisions_audit is append-only. UPDATE and DELETE operations are permanently prohibited on this table (FR-6, NFR-4).
 CONTEXT:  PL/pgSQL function prevent_audit_modification() line 3 at RAISE
 ```
+
+> [!NOTE] Row-Level Trigger Scope & TRUNCATE Protection
+> PostgreSQL `FOR EACH ROW` triggers do not fire on `TRUNCATE` operations. In production deployments, immutability against table truncation is enforced at the database role level by revoking `TRUNCATE` permissions on `analyst_decisions_audit` from the application database user (`REVOKE TRUNCATE ON analyst_decisions_audit FROM sentrax;`).
+
 
 ---
 
@@ -413,8 +432,8 @@ This preserves the original `created_at` timestamp while updating `updated_at`, 
 
 Sentra-X standardizes on **`psycopg` (v3)** across the entire Python backend, eliminating legacy dual-driver conflicts (`asyncpg` vs `psycopg2-binary`):
 
-* **Synchronous Pipeline & Worker:** `postgresql+psycopg://sentrax:***@localhost:5432/sentrax_db` (used by Wazuh poller, migration scripts, and seeders via SQLAlchemy 2.0 `Session`).
-* **Asynchronous Web Routes:** `postgresql+psycopg_async://sentrax:***@localhost:5432/sentrax_db` (used by FastAPI asynchronous endpoints via SQLAlchemy 2.0 `AsyncSession`).
+* **Synchronous Pipeline & Worker:** `postgresql+psycopg://sentrax:sentrax@localhost:5432/sentrax` (used by Wazuh poller, migration scripts, and seeders via SQLAlchemy 2.0 `Session`).
+* **Asynchronous Web Routes:** `postgresql+psycopg_async://sentrax:sentrax@localhost:5432/sentrax` (used by FastAPI asynchronous endpoints via SQLAlchemy 2.0 `AsyncSession`).
 
 ---
 
@@ -422,20 +441,26 @@ Sentra-X standardizes on **`psycopg` (v3)** across the entire Python backend, el
 
 ### 9.1 Applied Alembic Migrations
 1. **`0001_initial_schema`**: Core 7 tables, primary keys, and initial indexes.
-2. **`0002_add_feedback_exemplars` / `0002_add_audit_trail_immutability`**: Added `feedback_exemplars` table and PostgreSQL trigger `trg_prevent_audit_update_delete` ensuring append-only immutability on `analyst_decision_audits` (Decision 8.4, AC-11).
+2. **`0002_add_feedback_exemplars` / `0002_add_audit_trail_immutability`**: Added `feedback_exemplars` table and PostgreSQL trigger `trg_audit_immutability` ensuring append-only immutability on `analyst_decisions_audit` (Decision 8.4, AC-11).
 3. **`0003_add_srs_check_constraints`**: Full SRS Section 7.2.1 Data Dictionary validation:
    - `alerts.ck_alerts_rule_level`: `CHECK (rule_level BETWEEN 0 AND 15)`
    - `alerts.ck_alerts_retry_count`: `CHECK (retry_count >= 0)`
    - `ai_assessments.ck_ai_assessments_confidence_score`: `CHECK (confidence_score >= 0.0 AND confidence_score <= 1.0)`
    - `ai_assessments.ck_ai_assessments_retry_count`: `CHECK (retry_count BETWEEN 0 AND 3)`
    - `assets.criticality_tier`: `DEFAULT 'MEDIUM'` server default
-   - `feedback_exemplars.user_id`: UUID FK referencing `users(id)`
+   - `feedback_exemplars.user_id`: UUID FK referencing `users(id)` (synchronized synonym for `created_by`)
    - `feedback_exemplars.ck_exemplars_rationale_length`: `CHECK (length(rationale) >= 10)`
+4. **`0004_add_system_configurations`**: Added `system_configurations` table to persist runtime settings (Wazuh poller, thresholds, model selection) across multi-worker uvicorn instances and container replicas.
+5. **`0005_abr_audit_hardening`**: Forensic alignment with SRS v1.4 and AI pipeline specifications:
+   - Dropped legacy correlation index `ix_alerts_agent_src_ts`; created dedicated `ix_alerts_agent_timestamp` and `ix_alerts_src_ip_timestamp` (optimizes 24h `OR` correlation).
+   - Hardened `ck_audit_action_taken` to drop `MANUAL_TRIAGE_CLOSE`, standardizing on `MANUAL_TRIAGE_CLOSURE` for 100% analytics metric capture.
+   - Altered `feedback_exemplars.process_signature` to `NULLABLE` (allows Tier 2 matching for non-process alert overrides).
+   - Altered `assets.ip_address` to `NULLABLE` (prevents auto-registration worker crashes on IP-less agents).
 
 ### 9.2 Schema-Preserving Maintenance & Testing Scripts
-To support robust automated testing against the actual PostgreSQL 18.6 instance without destructive drops:
-* **`backend/scripts/reset_db.py`**: Truncates all tables in FK order (`TRUNCATE ... RESTART IDENTITY CASCADE`) and seeds baseline records matching `demo_seed.json` (3 users, 6 assets, 16 alerts, 12 evidence packs, 12 assessments, 3 audits, 4 exemplars).
-* **`backend/scripts/wipe_db.py`**: Safely clears all mock/test data while preserving 100% of the DDL schema, tables, constraints, indexes, and triggers.
-* **`backend/tests/test_db_schema.py`**: Strict CI test validating all 7 tables, 8 SRS columns, 8 indexes, and 13 SRS check constraints directly against `information_schema` and `pg_constraint`.
+To support robust automated testing against the actual PostgreSQL instance without destructive drops:
+* **`backend/scripts/reset_db.py`**: Truncates all tables in FK order (`TRUNCATE ... RESTART IDENTITY CASCADE`) and seeds baseline records matching `demo_seed.json` (3 users, 6 assets, 16 alerts, 12 evidence packs, 12 assessments, 3 audits, 4 exemplars, 1 system config).
+* **`backend/scripts/wipe_db.py`**: Safely clears all mock/test data while preserving 100% of the DDL schema, tables, constraints, indexes, and triggers across all 8 tables.
+* **`backend/tests/test_db_schema.py`**: Strict CI test validating all 8 tables, SRS columns, 9 indexes, and 13 SRS check constraints directly against `information_schema` and `pg_constraint`.
 
 

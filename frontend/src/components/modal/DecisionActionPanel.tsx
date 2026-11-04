@@ -140,7 +140,7 @@ export const DecisionActionPanel: React.FC<DecisionActionPanelProps> = ({
 
     let action: DecisionPayload['action'] = 'OVERRIDE';
     if (panelMode === 'manual_close') {
-      action = 'MANUAL_TRIAGE_CLOSE';
+      action = 'MANUAL_TRIAGE_CLOSURE';
     } else if (panelMode === 'resolve_escalation') {
       action = 'RESOLVE_ESCALATION';
     }
