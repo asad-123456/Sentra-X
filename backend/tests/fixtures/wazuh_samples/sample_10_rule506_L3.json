@@ -1,0 +1,65 @@
+{
+  "timestamp": "2026-10-31T12:05:30.639+0000",
+  "rule": {
+    "level": 3,
+    "description": "Wazuh agent stopped.",
+    "id": "506",
+    "mitre": {
+      "id": [
+        "T1562.001"
+      ],
+      "tactic": [
+        "Defense Evasion"
+      ],
+      "technique": [
+        "Disable or Modify Tools"
+      ]
+    },
+    "firedtimes": 1,
+    "mail": false,
+    "groups": [
+      "ossec"
+    ],
+    "pci_dss": [
+      "10.6.1",
+      "10.2.6"
+    ],
+    "gpg13": [
+      "10.1"
+    ],
+    "gdpr": [
+      "IV_35.7.d"
+    ],
+    "hipaa": [
+      "164.312.b"
+    ],
+    "nist_800_53": [
+      "AU.6",
+      "AU.14",
+      "AU.5"
+    ],
+    "tsc": [
+      "CC7.2",
+      "CC7.3",
+      "CC6.8"
+    ]
+  },
+  "agent": {
+    "id": "003",
+    "name": "Wazuh-Endpoint-1",
+    "ip": "10.0.2.15"
+  },
+  "manager": {
+    "name": "wazuh-server"
+  },
+  "id": "1793448330.123561",
+  "full_log": "ossec: Agent stopped: 'Wazuh-Endpoint-1->any'.",
+  "decoder": {
+    "parent": "ossec",
+    "name": "ossec"
+  },
+  "data": {
+    "extra_data": "Wazuh-Endpoint-1->any"
+  },
+  "location": "wazuh-remoted"
+}

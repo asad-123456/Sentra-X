@@ -1,0 +1,54 @@
+{
+  "timestamp": "2026-10-31T12:06:00.330+0000",
+  "rule": {
+    "level": 5,
+    "description": "SCA summary: CIS Ubuntu Linux 24.04 LTS Benchmark v1.0.0.: Score less than 80% (50)",
+    "id": "19003",
+    "firedtimes": 1,
+    "mail": false,
+    "groups": [
+      "sca"
+    ],
+    "gdpr": [
+      "IV_35.7.d"
+    ],
+    "pci_dss": [
+      "2.2"
+    ],
+    "nist_800_53": [
+      "CM.1"
+    ],
+    "tsc": [
+      "CC7.1",
+      "CC7.2"
+    ]
+  },
+  "agent": {
+    "id": "003",
+    "name": "Wazuh-Endpoint-1",
+    "ip": "10.0.2.15"
+  },
+  "manager": {
+    "name": "wazuh-server"
+  },
+  "id": "1793448360.129569",
+  "decoder": {
+    "name": "sca"
+  },
+  "data": {
+    "sca": {
+      "type": "summary",
+      "scan_id": "1353417376",
+      "policy": "CIS Ubuntu Linux 24.04 LTS Benchmark v1.0.0.",
+      "description": "This document provides prescriptive guidance for establishing a secure configuration posture for Ubuntu Linux 24.04 LTS based on CIS benchmark for Ubuntu Linux 24.04 LTS.",
+      "policy_id": "cis_ubuntu24-04",
+      "passed": "119",
+      "failed": "118",
+      "invalid": "42",
+      "total_checks": "279",
+      "score": "50",
+      "file": "cis_ubuntu24-04.yml"
+    }
+  },
+  "location": "sca"
+}

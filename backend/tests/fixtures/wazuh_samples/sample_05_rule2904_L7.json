@@ -1,0 +1,58 @@
+{
+  "timestamp": "2026-10-31T12:05:07.872+0000",
+  "rule": {
+    "level": 7,
+    "description": "Dpkg (Debian Package) half configured.",
+    "id": "2904",
+    "firedtimes": 29,
+    "mail": false,
+    "groups": [
+      "syslog",
+      "dpkg",
+      "config_changed"
+    ],
+    "pci_dss": [
+      "10.6.1",
+      "10.2.7"
+    ],
+    "gpg13": [
+      "4.10"
+    ],
+    "gdpr": [
+      "IV_35.7.d"
+    ],
+    "hipaa": [
+      "164.312.b"
+    ],
+    "nist_800_53": [
+      "AU.6",
+      "AU.14"
+    ],
+    "tsc": [
+      "CC7.2",
+      "CC7.3",
+      "CC6.8",
+      "CC8.1"
+    ]
+  },
+  "agent": {
+    "id": "003",
+    "name": "Wazuh-Endpoint-1",
+    "ip": "10.0.2.15"
+  },
+  "manager": {
+    "name": "wazuh-server"
+  },
+  "id": "1793448307.122557",
+  "full_log": "2026-10-31 12:05:07 status half-configured initramfs-tools:all 0.142ubuntu25.8",
+  "decoder": {
+    "name": "dpkg-decoder"
+  },
+  "data": {
+    "dpkg_status": "status half-configured",
+    "package": "initramfs-tools",
+    "arch": "all",
+    "version": "0.142ubuntu25.8"
+  },
+  "location": "/var/log/dpkg.log"
+}
