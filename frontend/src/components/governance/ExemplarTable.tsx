@@ -15,7 +15,7 @@ import {
 interface ExemplarTableProps {
   exemplars: FeedbackExemplar[];
   isLoading: boolean;
-  onToggleActive: (id: string, active: boolean) => Promise<void>;
+  onToggleActive: (id: string | number, active: boolean) => Promise<void>;
 }
 
 export const ExemplarTable: React.FC<ExemplarTableProps> = ({
@@ -25,7 +25,7 @@ export const ExemplarTable: React.FC<ExemplarTableProps> = ({
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'ACTIVE' | 'REVOKED'>('ALL');
-  const [updatingId, setUpdatingId] = useState<string | null>(null);
+  const [updatingId, setUpdatingId] = useState<string | number | null>(null);
 
   const filteredExemplars = exemplars.filter((ex) => {
     // Status filter
@@ -36,7 +36,7 @@ export const ExemplarTable: React.FC<ExemplarTableProps> = ({
     if (!searchQuery.trim()) return true;
     const q = searchQuery.toLowerCase();
     return (
-      ex.id.toLowerCase().includes(q) ||
+      String(ex.id).toLowerCase().includes(q) ||
       ex.rule_id.toLowerCase().includes(q) ||
       ex.process_signature.toLowerCase().includes(q) ||
       ex.rationale.toLowerCase().includes(q) ||

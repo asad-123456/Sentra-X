@@ -49,6 +49,8 @@ export const AssetRegistryTable: React.FC<AssetRegistryTableProps> = ({
   const [formError, setFormError] = useState<string | null>(null);
   const [isRegistering, setIsRegistering] = useState(false);
 
+  const [tableError, setTableError] = useState<string | null>(null);
+
   const filteredAssets = assets.filter((asset) => {
     if (!searchQuery.trim()) return true;
     const q = searchQuery.toLowerCase();
@@ -72,6 +74,7 @@ export const AssetRegistryTable: React.FC<AssetRegistryTableProps> = ({
 
   const handleSaveEdit = async (agentId: string) => {
     setIsSaving(true);
+    setTableError(null);
     try {
       await onUpdateCriticality(agentId, editTier, editDesc);
       setEditingId(null);
@@ -79,7 +82,8 @@ export const AssetRegistryTable: React.FC<AssetRegistryTableProps> = ({
       setTimeout(() => setSavedSuccessId(null), 2500);
     } catch (err) {
       console.error('Failed to update asset criticality:', err);
-      alert('Failed to update asset.');
+      const msg = err instanceof Error ? err.message : 'Failed to update asset.';
+      setTableError(msg);
     } finally {
       setIsSaving(false);
     }
@@ -248,6 +252,22 @@ export const AssetRegistryTable: React.FC<AssetRegistryTableProps> = ({
             </button>
           </div>
         </form>
+      )}
+
+      {tableError && (
+        <div className="flex items-center justify-between p-3 rounded-lg bg-red-950/40 border border-red-800/60 text-xs text-red-200 font-mono">
+          <div className="flex items-center gap-2">
+            <AlertCircle className="size-4 text-red-400 shrink-0" />
+            <span>{tableError}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setTableError(null)}
+            className="text-red-400 hover:text-red-200 text-xs ml-4"
+          >
+            Dismiss
+          </button>
+        </div>
       )}
 
       {/* Asset Table */}

@@ -6,6 +6,7 @@ import {
   CheckCircle2,
   Save,
   RotateCcw,
+  AlertCircle,
 } from 'lucide-react';
 import type { SystemConfig, LLMProvider } from '../../types/sentrax';
 
@@ -25,6 +26,7 @@ export const SystemConfigPanel: React.FC<SystemConfigPanelProps> = ({ config, on
 
   const [saving, setSaving] = useState(false);
   const [successMsg, setSuccessMsg] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   const handleProviderChange = (provider: LLMProvider) => {
     setLlmProvider(provider);
@@ -38,6 +40,7 @@ export const SystemConfigPanel: React.FC<SystemConfigPanelProps> = ({ config, on
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     setSaving(true);
+    setErrorMsg(null);
     try {
       await onSave({
         wazuh_endpoint: wazuhEndpoint,
@@ -52,7 +55,7 @@ export const SystemConfigPanel: React.FC<SystemConfigPanelProps> = ({ config, on
       setTimeout(() => setSuccessMsg(false), 2500);
     } catch (err) {
       console.error('Failed to save config:', err);
-      alert('Failed to update system configuration.');
+      setErrorMsg(err instanceof Error ? err.message : 'Failed to update system configuration.');
     } finally {
       setSaving(false);
     }
@@ -66,6 +69,7 @@ export const SystemConfigPanel: React.FC<SystemConfigPanelProps> = ({ config, on
     setModelName(config.model_name);
     setAbstentionThreshold(config.abstention_threshold);
     setMaxExemplars(config.max_exemplars_injected);
+    setErrorMsg(null);
   };
 
   return (
@@ -89,6 +93,22 @@ export const SystemConfigPanel: React.FC<SystemConfigPanelProps> = ({ config, on
       </div>
 
       <form onSubmit={handleSave} className="p-6 space-y-6">
+        {errorMsg && (
+          <div className="flex items-center justify-between p-3 rounded-lg bg-red-950/40 border border-red-800/60 text-xs text-red-200 font-mono">
+            <div className="flex items-center gap-2">
+              <AlertCircle className="size-4 text-red-400 shrink-0" />
+              <span>{errorMsg}</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setErrorMsg(null)}
+              className="text-red-400 hover:text-red-200 text-xs ml-4"
+            >
+              Dismiss
+            </button>
+          </div>
+        )}
+
         {/* Section 1: SIEM Ingestion Parameters */}
         <div className="space-y-4">
           <div className="text-xs font-mono uppercase text-zinc-500 font-semibold tracking-wider flex items-center gap-2">

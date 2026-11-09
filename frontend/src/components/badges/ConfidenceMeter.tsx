@@ -11,7 +11,7 @@ export const ConfidenceMeter: React.FC<ConfidenceMeterProps> = ({
   className = '',
   showAbstentionWarning = true,
 }) => {
-  if (score === null || score === undefined || score === 0) {
+  if (score === null || score === undefined) {
     return (
       <div className={`inline-flex items-center gap-1.5 whitespace-nowrap text-zinc-600 font-mono text-xs ${className}`}>
         <span>—</span>

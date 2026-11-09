@@ -5,6 +5,20 @@
 import React, { createContext, useContext, useState } from 'react';
 import type { User, UserRole } from '../types/sentrax';
 import { DEMO_USERS } from '../mock/demoData';
+import { apiClient, isLiveBackendConfigured } from '../api/client';
+
+interface LoginApiResponse {
+  access_token: string;
+  token_type: string;
+  user: {
+    id: string;
+    username: string;
+    email: string;
+    role: UserRole;
+    is_active: boolean;
+    created_at?: string;
+  };
+}
 
 interface AuthContextType {
   user: User | null;
@@ -12,7 +26,7 @@ interface AuthContextType {
   isLoading: boolean;
   login: (usernameOrEmail: string, password: string) => Promise<void>;
   logout: () => void;
-  switchDemoRole: (role: UserRole) => void;
+  switchDemoRole: (role: UserRole) => Promise<void> | void;
   hasRole: (allowedRoles: UserRole[]) => boolean;
 }
 
@@ -25,27 +39,62 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [user, setUser] = useState<User | null>(() => {
     try {
       const storedUser = localStorage.getItem(USER_KEY);
-      if (storedUser) return JSON.parse(storedUser);
+      const storedToken = localStorage.getItem(TOKEN_KEY);
+      if (storedUser && storedToken) {
+        return JSON.parse(storedUser);
+      }
     } catch {
       // Fallback if parsing fails
     }
-    const defaultUser = DEMO_USERS[0];
-    localStorage.setItem(TOKEN_KEY, 'mock-jwt-analyst-session');
-    localStorage.setItem(USER_KEY, JSON.stringify(defaultUser));
-    return defaultUser;
+    return null;
   });
 
   const [token, setToken] = useState<string | null>(() => {
-    return localStorage.getItem(TOKEN_KEY) || 'mock-jwt-analyst-session';
+    const storedUser = localStorage.getItem(USER_KEY);
+    const storedToken = localStorage.getItem(TOKEN_KEY);
+    return storedUser && storedToken ? storedToken : null;
   });
 
   const [isLoading, setIsLoading] = useState<boolean>(false);
 
   const login = async (usernameOrEmail: string, password: string): Promise<void> => {
     setIsLoading(true);
+
+    // Live backend authentication flow
+    if (isLiveBackendConfigured()) {
+      try {
+        const response = await apiClient<LoginApiResponse>('/api/v1/auth/login', {
+          method: 'POST',
+          body: JSON.stringify({
+            username: usernameOrEmail.trim(),
+            password,
+          }),
+        });
+
+        const liveUser: User = {
+          id: String(response.user.id),
+          username: response.user.username,
+          email: response.user.email,
+          role: response.user.role,
+          is_active: response.user.is_active,
+          created_at: response.user.created_at || new Date().toISOString(),
+        };
+
+        setUser(liveUser);
+        setToken(response.access_token);
+        localStorage.setItem(TOKEN_KEY, response.access_token);
+        localStorage.setItem(USER_KEY, JSON.stringify(liveUser));
+        setIsLoading(false);
+        return;
+      } catch (err) {
+        setIsLoading(false);
+        throw err;
+      }
+    }
+
+    // Offline / Mock fallback flow
     await new Promise((resolve) => setTimeout(resolve, 200));
 
-    // Simple credential check against demo accounts or email match
     const foundUser = DEMO_USERS.find(
       (u) =>
         u.email.toLowerCase() === usernameOrEmail.toLowerCase().trim() ||
@@ -72,8 +121,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     localStorage.removeItem(USER_KEY);
   };
 
-  const switchDemoRole = (role: UserRole) => {
+  const switchDemoRole = async (role: UserRole): Promise<void> => {
     const targetUser = DEMO_USERS.find((u) => u.role === role) || DEMO_USERS[0];
+    if (isLiveBackendConfigured()) {
+      try {
+        await login(targetUser.username, 'sentrax2026');
+        return;
+      } catch (err) {
+        console.warn('Live switchDemoRole failed:', err);
+        throw new Error(
+          `Live authentication failed for role '${role}'. Verify that the backend is running at ${import.meta.env.VITE_API_BASE_URL} and settings.DEMO_MODE is active.`,
+          { cause: err }
+        );
+      }
+    }
+
     const mockToken = `jwt-token-${role.toLowerCase()}-${Date.now()}`;
     setUser(targetUser);
     setToken(mockToken);

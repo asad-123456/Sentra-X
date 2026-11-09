@@ -9,6 +9,8 @@ interface QueueFilterBarProps {
   onSubStatusChange: (subStatus: string) => void;
   search: string;
   onSearchChange: (search: string) => void;
+  ruleId: string;
+  onRuleIdChange: (ruleId: string) => void;
   severity: string;
   onSeverityChange: (severity: string) => void;
   guardrail: GuardrailFilter;
@@ -27,6 +29,8 @@ export const QueueFilterBar: React.FC<QueueFilterBarProps> = ({
   onSubStatusChange,
   search,
   onSearchChange,
+  ruleId,
+  onRuleIdChange,
   severity,
   onSeverityChange,
   guardrail,
@@ -174,6 +178,27 @@ export const QueueFilterBar: React.FC<QueueFilterBarProps> = ({
               title="Clear search"
             >
               <X className="size-3.5" />
+            </button>
+          )}
+        </div>
+
+        {/* Dedicated Rule ID Filter */}
+        <div className="relative w-28 shrink-0">
+          <input
+            type="text"
+            value={ruleId}
+            onChange={(e) => onRuleIdChange(e.target.value)}
+            placeholder="Rule ID..."
+            className="w-full bg-zinc-900/80 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-xs font-mono text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:border-zinc-600 focus:ring-1 focus:ring-zinc-600 transition-colors"
+          />
+          {ruleId && (
+            <button
+              type="button"
+              onClick={() => onRuleIdChange('')}
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300 p-0.5"
+              title="Clear rule ID"
+            >
+              <X className="size-3" />
             </button>
           )}
         </div>

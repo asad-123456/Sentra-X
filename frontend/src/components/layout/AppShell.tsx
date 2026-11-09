@@ -12,16 +12,23 @@ import {
 import { useAuth } from '../../context/AuthContext';
 import type { UserRole } from '../../types/sentrax';
 
-import { getQueueCounts } from '../../api/services';
+import { getQueueCounts, getSystemConfig } from '../../api/services';
 
 export const AppShell: React.FC = () => {
   const { user, logout, switchDemoRole } = useAuth();
   const navigate = useNavigate();
   const [actionableCount, setActionableCount] = React.useState<number>(10);
+  const [llmLabel, setLlmLabel] = React.useState<string>('Gemini 2.5 Flash');
 
   React.useEffect(() => {
     getQueueCounts()
       .then((c) => setActionableCount(c.awaiting))
+      .catch(() => {});
+
+    getSystemConfig()
+      .then((cfg) => {
+        setLlmLabel(`${cfg.llm_provider === 'Gemini' ? 'Gemini 2.5 Flash' : 'Claude 3.5 Sonnet'}`);
+      })
       .catch(() => {});
   }, []);
 
@@ -94,7 +101,7 @@ export const AppShell: React.FC = () => {
           {/* Active LLM Provider Badge */}
           <div className="hidden lg:flex items-center gap-1.5 px-2.5 py-1 rounded bg-zinc-900/60 border border-zinc-800 text-xs font-mono text-zinc-300">
             <Sparkles className="size-3 text-cyan-400" />
-            <span>LLM: Gemini 2.5 Flash</span>
+            <span>LLM: {llmLabel}</span>
           </div>
         </div>
 
@@ -166,7 +173,9 @@ export const AppShell: React.FC = () => {
                 Navigation
               </div>
               <nav className="space-y-1">
-                {navItems.map((item) => {
+                {navItems
+                  .filter((item) => !item.allowedRoles || (user && item.allowedRoles.includes(user.role)))
+                  .map((item) => {
                   const Icon = item.icon;
                   return (
                     <NavLink

@@ -10,6 +10,13 @@ interface ScorecardRibbonProps {
 export const ScorecardRibbon: React.FC<ScorecardRibbonProps> = ({ report, isRunning }) => {
   const baselineRate = report ? report.baseline_bypass_rate.toFixed(1) : '53.3';
   const sentraxRate = report ? report.sentrax_bypass_rate.toFixed(1) : '0.0';
+  const totalPayloads = report?.total_payloads ?? 30;
+  const baselineBypassed = report?.adversarial_suite
+    ? report.adversarial_suite.filter((p) => p.baseline_bypassed).length
+    : Math.round(((report?.baseline_bypass_rate ?? 53.3) / 100) * totalPayloads);
+  const sentraxBypassed = report?.adversarial_suite
+    ? report.adversarial_suite.filter((p) => p.sentrax_bypassed).length
+    : Math.round(((report?.sentrax_bypass_rate ?? 0.0) / 100) * totalPayloads);
 
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -25,7 +32,7 @@ export const ScorecardRibbon: React.FC<ScorecardRibbonProps> = ({ report, isRunn
           <span className={`text-2xl font-bold font-mono tracking-tight text-red-400 ${isRunning ? 'animate-pulse' : ''}`}>
             {baselineRate}%
           </span>
-          <span className="text-xs text-zinc-500 font-mono">16 of 30 Bypassed</span>
+          <span className="text-xs text-zinc-500 font-mono">{baselineBypassed} of {totalPayloads} Bypassed</span>
         </div>
         <div className="mt-3 pt-2.5 border-t border-zinc-900 text-[11px] text-zinc-500 leading-tight">
           Direct prompt injection in raw logs successfully altered classification verdicts to False Positive.
@@ -50,7 +57,7 @@ export const ScorecardRibbon: React.FC<ScorecardRibbonProps> = ({ report, isRunn
           </span>
         </div>
         <div className="mt-3 pt-2.5 border-t border-zinc-900 text-[11px] text-zinc-400 leading-tight">
-          0 of 30 bypassed. 100% neutralized via strict JSON enveloping, delimiter stripping, and safety floor.
+          {sentraxBypassed} of {totalPayloads} bypassed. {sentraxBypassed === 0 ? '100% neutralized' : `${(((totalPayloads - sentraxBypassed) / totalPayloads) * 100).toFixed(1)}% neutralized`} via strict JSON enveloping, delimiter stripping, and safety floor.
         </div>
       </div>
 

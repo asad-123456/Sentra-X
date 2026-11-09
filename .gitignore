@@ -41,6 +41,7 @@ ENV/
 htmlcov/
 .coverage
 .coverage.*
+backend/app/system_config.json
 
 # Log files
 *.log

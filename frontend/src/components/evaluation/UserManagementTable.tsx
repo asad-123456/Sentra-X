@@ -29,6 +29,32 @@ export const UserManagementTable: React.FC<UserManagementTableProps> = ({
   const [formError, setFormError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
+  // Confirmation guard modal state
+  const [confirmModal, setConfirmModal] = useState<{
+    type: 'ROLE' | 'STATUS';
+    user: User;
+    targetRole?: UserRole;
+    targetStatus?: boolean;
+  } | null>(null);
+  const [isUpdating, setIsUpdating] = useState(false);
+
+  const handleConfirmAction = async () => {
+    if (!confirmModal) return;
+    setIsUpdating(true);
+    try {
+      if (confirmModal.type === 'ROLE' && confirmModal.targetRole) {
+        await onUpdateRole(confirmModal.user.id, confirmModal.targetRole);
+      } else if (confirmModal.type === 'STATUS' && confirmModal.targetStatus !== undefined) {
+        await onToggleActive(confirmModal.user.id, confirmModal.targetStatus);
+      }
+      setConfirmModal(null);
+    } catch (err) {
+      console.error('Failed to update user:', err);
+    } finally {
+      setIsUpdating(false);
+    }
+  };
+
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!username.trim() || !email.trim()) {
@@ -178,8 +204,17 @@ export const UserManagementTable: React.FC<UserManagementTableProps> = ({
                 <td className="py-3 px-4">
                   <select
                     value={u.role}
-                    onChange={(e) => onUpdateRole(u.id, e.target.value as UserRole)}
-                    className="px-2 py-1 bg-zinc-900 border border-zinc-800 rounded text-xs font-mono text-zinc-200 focus:outline-none focus:border-zinc-600"
+                    onChange={(e) => {
+                      const targetRole = e.target.value as UserRole;
+                      if (targetRole !== u.role) {
+                        setConfirmModal({
+                          type: 'ROLE',
+                          user: u,
+                          targetRole,
+                        });
+                      }
+                    }}
+                    className="px-2 py-1 bg-zinc-900 border border-zinc-800 rounded text-xs font-mono text-zinc-200 focus:outline-none focus:border-zinc-600 cursor-pointer"
                   >
                     <option value="Analyst">Analyst</option>
                     <option value="TeamLead">TeamLead</option>
@@ -205,8 +240,14 @@ export const UserManagementTable: React.FC<UserManagementTableProps> = ({
                 <td className="py-3 px-4 text-right">
                   <button
                     type="button"
-                    onClick={() => onToggleActive(u.id, !u.is_active)}
-                    className={`px-2 py-1 rounded text-xs font-mono transition-colors ${
+                    onClick={() => {
+                      setConfirmModal({
+                        type: 'STATUS',
+                        user: u,
+                        targetStatus: !u.is_active,
+                      });
+                    }}
+                    className={`px-2 py-1 rounded text-xs font-mono transition-colors cursor-pointer ${
                       u.is_active
                         ? 'border border-red-900/60 text-red-400 hover:bg-red-950/30'
                         : 'border border-emerald-900/60 text-emerald-400 hover:bg-emerald-950/30'
@@ -230,6 +271,63 @@ export const UserManagementTable: React.FC<UserManagementTableProps> = ({
           Total Users: {users.length}
         </span>
       </div>
+
+      {/* Confirmation Guard Modal */}
+      {confirmModal && (
+        <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4">
+          <div className="bg-zinc-950 border border-zinc-750 rounded-xl p-5 max-w-sm w-full space-y-4 shadow-2xl animate-in fade-in zoom-in-95">
+            <div className="flex items-center gap-2.5">
+              <div className="p-2 rounded-lg bg-amber-950/60 border border-amber-800/60 text-amber-400">
+                <AlertCircle className="size-4" />
+              </div>
+              <h3 className="text-sm font-semibold font-mono text-zinc-100">
+                {confirmModal.type === 'ROLE'
+                  ? 'Confirm Role Modification'
+                  : 'Confirm Account Status Change'}
+              </h3>
+            </div>
+
+            <p className="text-xs text-zinc-300 font-sans leading-relaxed">
+              {confirmModal.type === 'ROLE' ? (
+                <>
+                  Are you sure you want to change user{' '}
+                  <span className="font-mono font-bold text-white">@{confirmModal.user.username}</span>'s role from{' '}
+                  <span className="font-mono text-zinc-400">{confirmModal.user.role}</span> to{' '}
+                  <span className="font-mono font-bold text-cyan-400">{confirmModal.targetRole}</span>?
+                </>
+              ) : (
+                <>
+                  Are you sure you want to{' '}
+                  <span className="font-mono font-bold text-white">
+                    {confirmModal.targetStatus ? 'ACTIVATE' : 'DEACTIVATE'}
+                  </span>{' '}
+                  the account for user{' '}
+                  <span className="font-mono font-bold text-white">@{confirmModal.user.username}</span>?
+                </>
+              )}
+            </p>
+
+            <div className="flex items-center justify-end gap-2.5 pt-2">
+              <button
+                type="button"
+                disabled={isUpdating}
+                onClick={() => setConfirmModal(null)}
+                className="px-3 py-1.5 rounded-lg border border-zinc-800 bg-zinc-900 text-xs font-mono text-zinc-300 hover:bg-zinc-800 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={isUpdating}
+                onClick={handleConfirmAction}
+                className="px-4 py-1.5 rounded-lg bg-white text-zinc-950 font-mono text-xs font-semibold hover:bg-zinc-200 transition-colors disabled:opacity-50"
+              >
+                {isUpdating ? 'Updating...' : 'Confirm'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

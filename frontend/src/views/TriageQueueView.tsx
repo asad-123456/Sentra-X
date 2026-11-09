@@ -27,6 +27,7 @@ export const TriageQueueView: React.FC = () => {
   const [severity, setSeverity] = useState<string>('ALL');
   const [guardrail, setGuardrail] = useState<GuardrailFilter>('ALL');
   const [assetTier, setAssetTier] = useState<string>('ALL');
+  const [ruleId, setRuleId] = useState<string>('');
 
   // Pagination State
   const [page, setPage] = useState<number>(1);
@@ -56,6 +57,7 @@ export const TriageQueueView: React.FC = () => {
   // Check if any non-default filter is currently active
   const hasActiveFilters =
     search.trim() !== '' ||
+    ruleId.trim() !== '' ||
     severity !== 'ALL' ||
     guardrail !== 'ALL' ||
     assetTier !== 'ALL' ||
@@ -88,6 +90,7 @@ export const TriageQueueView: React.FC = () => {
       guardrail: guardrail === 'ALL' ? undefined : guardrail,
       assetTier: assetTier === 'ALL' ? undefined : assetTier,
       search: search.trim() === '' ? undefined : search.trim(),
+      ruleId: ruleId.trim() === '' ? undefined : ruleId.trim(),
       page,
       pageSize,
     })
@@ -109,7 +112,7 @@ export const TriageQueueView: React.FC = () => {
     return () => {
       isCancelled = true;
     };
-  }, [currentTab, subStatus, severity, guardrail, assetTier, search, page, pageSize]);
+  }, [currentTab, subStatus, severity, guardrail, assetTier, search, ruleId, page, pageSize]);
 
   // Reset page to 1 when filters change
   const handleTabChange = (tab: QueueTab) => {
@@ -150,6 +153,7 @@ export const TriageQueueView: React.FC = () => {
   const handleResetFilters = () => {
     startTransition(() => {
       setSearch('');
+      setRuleId('');
       setSeverity('ALL');
       setGuardrail('ALL');
       setAssetTier('ALL');
@@ -177,6 +181,7 @@ export const TriageQueueView: React.FC = () => {
           guardrail: guardrail === 'ALL' ? undefined : guardrail,
           assetTier: assetTier === 'ALL' ? undefined : assetTier,
           search: search.trim() === '' ? undefined : search.trim(),
+          ruleId: ruleId.trim() === '' ? undefined : ruleId.trim(),
           page,
           pageSize,
         }),
@@ -337,6 +342,11 @@ export const TriageQueueView: React.FC = () => {
         onSubStatusChange={handleSubStatusChange}
         search={search}
         onSearchChange={handleSearchChange}
+        ruleId={ruleId}
+        onRuleIdChange={(val) => {
+          setRuleId(val);
+          setPage(1);
+        }}
         severity={severity}
         onSeverityChange={handleSeverityChange}
         guardrail={guardrail}

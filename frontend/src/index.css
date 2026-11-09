@@ -61,6 +61,9 @@
   --color-input: var(--input);
   --color-ring: var(--ring);
 
+  --color-zinc-750: oklch(0.315 0.008 285.823);
+  --color-zinc-850: oklch(0.218 0.006 285.885);
+
   --color-sidebar: var(--sidebar);
   --color-sidebar-foreground: var(--sidebar-foreground);
   --color-sidebar-primary: var(--sidebar-primary);

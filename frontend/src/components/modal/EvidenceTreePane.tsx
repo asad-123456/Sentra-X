@@ -88,21 +88,28 @@ export const EvidenceTreePane: React.FC<EvidenceTreePaneProps> = ({
     }
   };
 
-  // Recursive Tree Node Renderer with Dot-Notation Key Matching
+  // Recursive Tree Node Renderer supporting dot-notation, list leaves, and bracket indexes
   const renderTreeNode = (key: string, value: unknown, currentPath: string, depth = 0) => {
+    const isArray = Array.isArray(value);
     const isObject = value !== null && typeof value === 'object';
+    const isArrayOfPrimitives =
+      isArray && value.every((v) => v === null || typeof v !== 'object');
+    const isContainer = isObject && !isArrayOfPrimitives;
+
     const isCited = citedEvidenceKeys.some(
       (k) =>
         k === currentPath ||
-        k.endsWith(currentPath) ||
-        currentPath.endsWith(k) ||
-        k.startsWith(currentPath + '.')
+        k.startsWith(currentPath + '.') ||
+        k.startsWith(currentPath + '[')
     );
     const isSelected = selectedCitationKey === currentPath;
     const isCollapsed = Boolean(collapsedNodes[currentPath]);
 
-    if (isObject) {
-      const keys = Object.keys(value as Record<string, unknown>);
+    if (isContainer) {
+      const keys = isArray
+        ? Array.from({ length: value.length }, (_, i) => i)
+        : Object.keys(value as Record<string, unknown>);
+
       return (
         <div key={currentPath} className="space-y-1">
           <div
@@ -117,7 +124,6 @@ export const EvidenceTreePane: React.FC<EvidenceTreePaneProps> = ({
             }`}
             style={{ marginLeft: `${depth * 14}px` }}
           >
-
             {isCollapsed ? (
               <ChevronRight className="size-3.5 text-zinc-500 shrink-0" />
             ) : (
@@ -138,21 +144,30 @@ export const EvidenceTreePane: React.FC<EvidenceTreePaneProps> = ({
 
           {!isCollapsed && (
             <div className="space-y-1">
-              {keys.map((subKey) =>
-                renderTreeNode(
-                  subKey,
-                  (value as Record<string, unknown>)[subKey],
-                  `${currentPath}.${subKey}`,
-                  depth + 1
-                )
-              )}
+              {isArray
+                ? (value as unknown[]).map((subVal, idx) =>
+                    renderTreeNode(
+                      `[${idx}]`,
+                      subVal,
+                      `${currentPath}[${idx}]`,
+                      depth + 1
+                    )
+                  )
+                : (keys as string[]).map((subKey) =>
+                    renderTreeNode(
+                      subKey,
+                      (value as Record<string, unknown>)[subKey],
+                      `${currentPath}.${subKey}`,
+                      depth + 1
+                    )
+                  )}
             </div>
           )}
         </div>
       );
     }
 
-    // Leaf Value Node
+    // Leaf Value Node (handles primitives and lists of plain values as single citable leaf)
     return (
       <div
         key={currentPath}
@@ -169,7 +184,9 @@ export const EvidenceTreePane: React.FC<EvidenceTreePaneProps> = ({
         <div className="flex items-center gap-2 min-w-0">
           <span className="text-zinc-400 font-medium shrink-0">{key}:</span>
           <span className="text-zinc-100 break-all select-all font-mono">
-            {typeof value === 'boolean'
+            {isArrayOfPrimitives
+              ? JSON.stringify(value)
+              : typeof value === 'boolean'
               ? String(value)
               : typeof value === 'string'
               ? `"${value}"`
@@ -324,12 +341,17 @@ export const EvidenceTreePane: React.FC<EvidenceTreePaneProps> = ({
         {activeTab === 'prompt_envelope' && (
           <div className="space-y-3 flex flex-col h-full min-h-0">
             <div className="p-3.5 rounded-xl bg-cyan-950/20 border border-cyan-800/40 text-cyan-200 text-xs font-sans space-y-1 shrink-0">
-              <div className="font-semibold text-cyan-300 flex items-center gap-1.5 font-mono text-xs">
-                <ShieldCheck className="size-4" />
-                <span>Isolated Prompt Envelope Preview</span>
+              <div className="font-semibold text-cyan-300 flex items-center justify-between font-mono text-xs">
+                <div className="flex items-center gap-1.5">
+                  <ShieldCheck className="size-4" />
+                  <span>Isolated Prompt Envelope</span>
+                </div>
+                <span className="text-[10px] px-2 py-0.5 rounded bg-cyan-900/40 border border-cyan-700/50 text-cyan-300 font-mono">
+                  Illustrative Reconstruction
+                </span>
               </div>
               <p className="text-[11px] text-zinc-400">
-                Demonstrates how raw user/host telemetry is sanitized, stripped of adversarial delimiter strings, and quarantined inside read-only XML/JSON tags prior to LLM evaluation.
+                Client-side reconstruction showing sanitized telemetry quarantined inside nonce-delimited blocks (e.g. &lt;&lt;&lt;EVIDENCE_PACK_&lt;NONCE&gt;...&gt;&gt;&gt;) prior to LLM evaluation. Raw assembled prompts are transient and not stored in the database.
               </p>
             </div>
 
@@ -343,7 +365,7 @@ export const EvidenceTreePane: React.FC<EvidenceTreePaneProps> = ({
                     envelope_id: `env-${evidencePack.id}`,
                     sanitized_at: evidencePack.created_at,
                     injection_suspect: evidencePack.injection_suspect,
-                    delimiter_policy: 'STRICT_XML_ISOLATION_STRIPPED',
+                    delimiter_policy: 'RANDOM_NONCE_DELIMITED_ISOLATION',
                   },
                   read_only_telemetry_payload: evidencePack.telemetry_payload,
                   asset_context: evidencePack.asset_context,

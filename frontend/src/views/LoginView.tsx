@@ -6,7 +6,7 @@ import type { UserRole } from '../types/sentrax';
 
 export const LoginView: React.FC = () => {
   const [usernameOrEmail, setUsernameOrEmail] = useState('analyst@sentrax.internal');
-  const [password, setPassword] = useState('password123');
+  const [password, setPassword] = useState('');
   const [errorBanner, setErrorBanner] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -35,9 +35,16 @@ export const LoginView: React.FC = () => {
     }
   };
 
-  const handleQuickRole = (role: UserRole) => {
-    switchDemoRole(role);
-    navigate(from, { replace: true });
+  const handleQuickRole = async (role: UserRole) => {
+    setErrorBanner(null);
+    try {
+      await switchDemoRole(role);
+      navigate(from, { replace: true });
+    } catch (err: unknown) {
+      setErrorBanner(
+        err instanceof Error ? err.message : `Failed to authenticate live user for role '${role}'.`
+      );
+    }
   };
 
   return (
@@ -114,6 +121,7 @@ export const LoginView: React.FC = () => {
                 placeholder="••••••••••••"
                 className="w-full px-3 py-2 rounded-lg bg-black border border-zinc-800 focus:border-zinc-500 text-zinc-100 text-sm font-mono focus:outline-none focus:ring-1 focus:ring-zinc-400 transition-all placeholder:text-zinc-600"
               />
+              <p className="text-[11px] text-zinc-500 font-mono">Demo password: password123</p>
             </div>
 
             <button
@@ -151,7 +159,7 @@ export const LoginView: React.FC = () => {
                 onClick={() => handleQuickRole('Admin')}
                 className="p-2 rounded-md bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-[11px] font-mono text-zinc-300 transition-colors text-center"
               >
-                Super Admin
+                Admin
               </button>
             </div>
           </div>
