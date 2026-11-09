@@ -90,7 +90,10 @@ def update_user_role(
 
     role = payload.get("role")
     if role not in ("Analyst", "TeamLead", "Admin"):
-        raise HTTPException(status_code=400, detail="Invalid role.")
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"HTTP 422: Invalid role '{role}'. Must be one of: 'Analyst', 'TeamLead', 'Admin'.",
+        )
 
     user.role = role
     db.commit()
@@ -141,17 +144,27 @@ def create_user(
     role = payload.get("role", "Analyst")
 
     if not username or not email:
-        raise HTTPException(status_code=400, detail="Username and email are required.")
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="HTTP 422: Username and email are required.",
+        )
+
+    if role not in ("Analyst", "TeamLead", "Admin"):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"HTTP 422: Invalid role '{role}'. Must be one of: 'Analyst', 'TeamLead', 'Admin'.",
+        )
 
     existing = db.query(User).filter((User.username == username) | (User.email == email)).first()
     if existing:
         raise HTTPException(status_code=409, detail="Username or email already exists.")
 
+    raw_password = payload.get("password") or "sentrax2026"
     new_user = User(
         id=uuid.uuid4(),
         username=username,
         email=email,
-        password_hash=hash_password("sentrax2026"),
+        password_hash=hash_password(raw_password),
         role=role,
         is_active=True,
     )

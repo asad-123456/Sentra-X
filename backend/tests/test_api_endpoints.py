@@ -116,6 +116,18 @@ def run_all_api_tests():
     assert override_res.json()["exemplar_created"] is True
     print("✅ PASS: [POST /api/v1/alerts/.../decision] Submitted OVERRIDE and created feedback exemplar (FR-4)")
 
+    # 9b. Decision Submission: RETRY_AI (verifying status stays in awaiting and guardrails applied)
+    retry_alert_id = "al-9019"
+    retry_res = client.post(
+        f"/api/v1/alerts/{retry_alert_id}/decision",
+        json={"action": "RETRY_AI", "rationale": "Re-running guardrails check on ambiguous telemetry."},
+    )
+    assert retry_res.status_code == 200, f"RETRY_AI failed: {retry_res.text}"
+    assert retry_res.json()["action_taken"] == "RETRY_AI"
+    retry_detail = client.get(f"/api/v1/alerts/{retry_alert_id}").json()
+    assert retry_detail["alert"]["status"] in ("AWAITING_ANALYST", "NEEDS_MANUAL_TRIAGE")
+    print(f"✅ PASS: [POST /api/v1/alerts/.../decision] RETRY_AI succeeded (Status: {retry_detail['alert']['status']})")
+
     # 10. Analytics KPI Summary
     analytics_res = client.get("/api/v1/analytics?range=30d")
     assert analytics_res.status_code == 200, f"Analytics failed: {analytics_res.text}"
@@ -166,6 +178,23 @@ def run_all_api_tests():
     assert report["nfr3_target_achieved"] is True
     print(f"✅ PASS: [GET /api/v1/evaluation/report] Verified 0% prompt-injection bypass target met")
 
+    # 16b. Benchmark Evaluation Run (POST /run)
+    run_res = client.post("/api/v1/evaluation/run?mode=full")
+    assert run_res.status_code == 200
+    run_report = run_res.json()
+    assert run_report["sentrax_bypass_rate"] == 0.0
+    assert len(run_report["adversarial_suite"]) == 30
+    print(f"✅ PASS: [POST /api/v1/evaluation/run] Executed adversarial evaluation run dynamically")
+
+    # 16c. Benchmark Export Formats (Markdown & CSV per AC-18)
+    md_res = client.get("/api/v1/evaluation/export-md")
+    assert md_res.status_code == 200
+    assert "Sentra-X Adversarial Benchmark & Model Evaluation Report" in md_res.text
+    csv_res = client.get("/api/v1/evaluation/export-csv")
+    assert csv_res.status_code == 200
+    assert "Payload ID,Category,Target Field" in csv_res.text
+    print(f"✅ PASS: [GET /api/v1/evaluation/export-md & export-csv] Generated research evaluation reports (AC-18)")
+
     # =========================================================================
     # SRS v1.4 ACCEPTANCE CRITERIA SUITE (AC-12, AC-14, AC-16, AC-17)
     # =========================================================================
@@ -181,7 +210,11 @@ def run_all_api_tests():
     admin_token = admin_login.json()["access_token"]
 
     # AC-12: Analyst calling Resolve Escalation receives 403; TeamLead succeeds
-    target_esc_alert_id = queue_data["items"][2]["id"]
+    awaiting_res = client.get("/api/v1/alerts?tab=awaiting&page=1&page_size=10")
+    assert awaiting_res.status_code == 200
+    awaiting_items = awaiting_res.json().get("items", [])
+    assert len(awaiting_items) > 0, "No awaiting alerts found to test escalation"
+    target_esc_alert_id = awaiting_items[0]["id"]
     escalate_action = client.post(
         f"/api/v1/alerts/{target_esc_alert_id}/decision",
         json={"action": "ESCALATE", "rationale": "Escalating suspicious telemetry to Team Lead."},
@@ -250,6 +283,46 @@ def run_all_api_tests():
     assert tl_asset_patch.json()["criticality_tier"] == "CRITICAL"
     print("✅ PASS: [AC-17] Team Lead modifying asset criticality tier succeeds and records update (HTTP 200)")
 
+    # AC-17 / UC-10: Invalid criticality tier strictly rejected with HTTP 422
+    bad_tier_patch = client.patch(
+        "/api/v1/governance/assets/001",
+        headers={"Authorization": f"Bearer {tl_token}"},
+        json={"criticality_tier": "INVALID_TIER"},
+    )
+    assert bad_tier_patch.status_code == 422
+    print("✅ PASS: [UC-10] Modifying asset criticality with invalid tier strictly rejected with HTTP 422")
+
+    # UC-11: Invalid user role update strictly rejected with HTTP 422
+    first_user_id = admin_users.json()[0]["id"]
+    bad_role_patch = client.patch(
+        f"/api/v1/admin/users/{first_user_id}/role",
+        headers={"Authorization": f"Bearer {admin_token}"},
+        json={"role": "INVALID_ROLE"},
+    )
+    assert bad_role_patch.status_code == 422
+    print("✅ PASS: [UC-11] Modifying user with invalid role strictly rejected with HTTP 422")
+
+    # UC-4..8: Invalid state transitions strictly rejected with HTTP 422
+    bad_esc_res = client.post(
+        f"/api/v1/alerts/{retry_alert_id}/decision",
+        headers={"Authorization": f"Bearer {tl_token}"},
+        json={
+            "action": "RESOLVE_ESCALATION",
+            "final_verdict": "TRUE_POSITIVE",
+            "final_severity": "HIGH",
+            "rationale": "Attempting invalid resolve on non-escalated alert.",
+        },
+    )
+    assert bad_esc_res.status_code == 422
+    print("✅ PASS: [UC-8] Resolving non-escalated alert strictly rejected with HTTP 422")
+
+    closed_alert_res = client.post(
+        f"/api/v1/alerts/{test_alert_id}/decision",
+        json={"action": "APPROVE"},
+    )
+    assert closed_alert_res.status_code == 422
+    print("✅ PASS: [UC-4] Decision on already CLOSED alert strictly rejected with HTTP 422")
+
     # 17. System Configuration: Database Persistence & Thread Safety
     config_res = client.get("/api/v1/admin/config", headers={"Authorization": f"Bearer {admin_token}"})
     assert config_res.status_code == 200
@@ -283,7 +356,10 @@ def run_all_api_tests():
         unauth_gov = client.patch("/api/v1/governance/assets/001", json={"criticality_tier": "HIGH"})
         assert unauth_gov.status_code == 401, f"Expected 401 on unauthenticated asset patch, got {unauth_gov.status_code}"
 
-        print("✅ PASS: All administrative & analytics endpoints strictly enforce HTTP 401 when DEMO_MODE=False")
+        unauth_dec = client.post("/api/v1/alerts/al-9021/decision", json={"action": "APPROVE"})
+        assert unauth_dec.status_code == 401, f"Expected 401 on unauthenticated decision, got {unauth_dec.status_code}"
+
+        print("✅ PASS: All administrative, analytics & decision endpoints strictly enforce HTTP 401 when DEMO_MODE=False")
     finally:
         settings.DEMO_MODE = orig_demo_mode
 
@@ -298,6 +374,8 @@ def run_all_api_tests():
             headers={"Authorization": f"Bearer {token}"},
             json={
                 "action": "MANUAL_TRIAGE_CLOSURE",
+                "final_verdict": "FALSE_POSITIVE",
+                "final_severity": "LOW",
                 "rationale": "Manual triage confirmed benign service task execution by authorized admin.",
                 "user_id": analyst_user_id,
             },

@@ -29,6 +29,7 @@ router = APIRouter(prefix="/alerts", tags=["Alerts & Triage Queue"])
 def get_alerts(
     tab: str = Query("awaiting", pattern="^(awaiting|escalated|closed)$"),
     subStatus: Optional[str] = Query(None),
+    status: Optional[str] = Query(None),
     search: Optional[str] = Query(None),
     severity: Optional[str] = Query(None),
     guardrail: Optional[str] = Query(None),
@@ -46,13 +47,16 @@ def get_alerts(
     )
 
     # 1. Filter by Tab & SubStatus
-    if tab == "awaiting":
-        if subStatus == "AWAITING_ANALYST":
-            query = query.filter(Alert.status == "AWAITING_ANALYST")
-        elif subStatus == "NEEDS_MANUAL_TRIAGE":
-            query = query.filter(Alert.status == "NEEDS_MANUAL_TRIAGE")
-        else:
-            query = query.filter(Alert.status.in_(["AWAITING_ANALYST", "NEEDS_MANUAL_TRIAGE"]))
+    effective_sub = subStatus or status
+    if effective_sub:
+        if effective_sub in ("AWAITING_ANALYST", "NEEDS_MANUAL_TRIAGE", "PENDING_REVIEW"):
+            query = query.filter(Alert.status == effective_sub)
+        elif effective_sub == "ESCALATED":
+            query = query.filter(Alert.status == "ESCALATED")
+        elif effective_sub == "CLOSED":
+            query = query.filter(Alert.status == "CLOSED")
+    elif tab == "awaiting":
+        query = query.filter(Alert.status.in_(["AWAITING_ANALYST", "NEEDS_MANUAL_TRIAGE", "PENDING_REVIEW"]))
     elif tab == "escalated":
         query = query.filter(Alert.status == "ESCALATED")
     elif tab == "closed":
@@ -384,24 +388,7 @@ def submit_alert_decision(
             detail=f"HTTP 422: Invalid action '{action}'. Must be one of: {sorted(VALID_ACTIONS)}.",
         )
 
-    rationale = (payload.get("rationale") or "").strip()
-    final_verdict = payload.get("final_verdict")
-    final_severity = payload.get("final_severity")
-
-    # Enforce >= 10 char rationale on actions requiring mandatory justification (FR-6, AC-11)
-    if action in ("OVERRIDE", "MANUAL_TRIAGE_CLOSURE", "RESOLVE_ESCALATION"):
-        if len(rationale) < 10:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail=f"HTTP 422: Mandatory rationale of >= 10 characters required for action '{action}'.",
-            )
-        if action == "OVERRIDE":
-            if not final_verdict:
-                raise HTTPException(status_code=400, detail="final_verdict is required on OVERRIDE.")
-            if not final_severity:
-                raise HTTPException(status_code=400, detail="final_severity is required on OVERRIDE.")
-
-    # Resolve active user from JWT Bearer token or payload
+    # 1. Resolve active user from JWT Bearer token or payload (Authentication First)
     user = None
     if auth and auth.credentials:
         try:
@@ -415,6 +402,11 @@ def submit_alert_decision(
             pass
 
     if not user:
+        if not settings.DEMO_MODE:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="HTTP 401 Unauthorized: Valid authentication token required.",
+            )
         user_id_raw = payload.get("user_id")
         if user_id_raw:
             user_uuid = parse_uuid(str(user_id_raw))
@@ -425,13 +417,60 @@ def submit_alert_decision(
     else:
         user_uuid = user.id
 
-    # Enforce AC-12 (FR-6): Only TeamLead or Admin can resolve escalated alerts
+    # 2. Enforce AC-12 (FR-6): Only TeamLead or Admin can resolve escalated alerts
     if action == "RESOLVE_ESCALATION":
         caller_role = user.role if user else "Analyst"
         if caller_role not in ("TeamLead", "Admin"):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="HTTP 403 Forbidden: Only TeamLead or Admin can resolve escalated alerts (AC-12, FR-6).",
+            )
+
+    # 3. Enforce state transition rules (SRS v1.4 §6.4, UC-4..8)
+    if alert.status == "CLOSED":
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"HTTP 422: Alert {alert_id} is already CLOSED and cannot be transitioned.",
+        )
+
+    if action == "RESOLVE_ESCALATION" and alert.status != "ESCALATED":
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"HTTP 422: Action RESOLVE_ESCALATION is only valid for alerts in ESCALATED status (current: {alert.status}).",
+        )
+
+    if action == "MANUAL_TRIAGE_CLOSURE" and alert.status != "NEEDS_MANUAL_TRIAGE":
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"HTTP 422: Action MANUAL_TRIAGE_CLOSURE is only valid for alerts in NEEDS_MANUAL_TRIAGE status (current: {alert.status}).",
+        )
+
+    if action in ("APPROVE", "OVERRIDE") and alert.status not in ("AWAITING_ANALYST", "PENDING_REVIEW"):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"HTTP 422: Action {action} is only valid for alerts in AWAITING_ANALYST status (current: {alert.status}).",
+        )
+
+    rationale = (payload.get("rationale") or "").strip()
+    final_verdict = payload.get("final_verdict")
+    final_severity = payload.get("final_severity")
+
+    # Enforce >= 10 char rationale on actions requiring mandatory justification (FR-6, AC-11)
+    if action in ("OVERRIDE", "MANUAL_TRIAGE_CLOSURE", "RESOLVE_ESCALATION"):
+        if len(rationale) < 10:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"HTTP 422: Mandatory rationale of >= 10 characters required for action '{action}'.",
+            )
+        if not final_verdict or final_verdict not in ("TRUE_POSITIVE", "FALSE_POSITIVE"):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"HTTP 422: Binary final_verdict ('TRUE_POSITIVE' or 'FALSE_POSITIVE') is required on {action}.",
+            )
+        if not final_severity or final_severity not in ("LOW", "MEDIUM", "HIGH", "CRITICAL"):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"HTTP 422: Valid final_severity ('LOW', 'MEDIUM', 'HIGH', 'CRITICAL') is required on {action}.",
             )
 
     # Get current AI assessment for previous state
@@ -446,44 +485,69 @@ def submit_alert_decision(
     elif action == "ESCALATE":
         alert.status = "ESCALATED"
     elif action == "RETRY_AI":
-        alert.status = "PENDING_REVIEW"
+        alert.status = "AWAITING_ANALYST"
         alert.retry_count = 0
         if ai:
             ai.retry_count = 0
-            # Clean execution hook for live pipeline / guardrails (WP-4 handshake)
-            if not settings.DEMO_MODE:
-                try:
-                    from ..services.rules_engine import apply_guardrails
-                    from ..services.triage_schema import LLMTriageOutput
+            # Re-evaluate guardrails deterministically (rules engine)
+            try:
+                from ..services.rules_engine import apply_guardrails
+                from ..services.triage_schema import LLMTriageOutput
 
-                    ep = db.query(EvidencePack).filter(EvidencePack.alert_id == alert.id).first()
-                    valid_keys = ep.valid_dot_keys if ep and ep.valid_dot_keys else []
-                    injection = ep.injection_suspect if ep else False
-                    llm_repr = LLMTriageOutput(
-                        verdict=ai.raw_verdict if ai.raw_verdict in ("TRUE_POSITIVE", "FALSE_POSITIVE", "NEEDS_ANALYST_REVIEW") else "TRUE_POSITIVE",
-                        recommended_severity=ai.raw_severity if ai.raw_severity in ("LOW", "MEDIUM", "HIGH", "CRITICAL") else "HIGH",
-                        confidence_score=ai.confidence_score if ai.confidence_score is not None else 0.85,
-                        cited_evidence_keys=ai.cited_evidence_keys if isinstance(ai.cited_evidence_keys, list) else [],
-                        explanation=(ai.explanation or "Re-evaluated via RETRY_AI trigger.")[:500],
-                    )
-                    gr = apply_guardrails(
-                        rule_level=alert.rule_level,
-                        llm=llm_repr,
-                        valid_dot_keys=valid_keys,
-                        injection_suspect=injection,
-                    )
-                    ai.effective_verdict = gr.effective_verdict
-                    ai.effective_severity = gr.effective_severity
-                    ai.safety_floor_triggered = gr.safety_floor_triggered
-                    ai.abstention_triggered = gr.abstention_triggered
-                    ai.guardrail_audit_note = gr.guardrail_audit_note
-                except Exception:
-                    pass  # Non-blocking if executing in decoupled worker mode
+                ep = db.query(EvidencePack).filter(EvidencePack.alert_id == alert.id).first()
+                valid_keys = ep.valid_dot_keys if ep and ep.valid_dot_keys else []
+                injection = ep.injection_suspect if ep else False
+                llm_repr = LLMTriageOutput(
+                    verdict=ai.raw_verdict if ai.raw_verdict in ("TRUE_POSITIVE", "FALSE_POSITIVE", "NEEDS_ANALYST_REVIEW") else "TRUE_POSITIVE",
+                    recommended_severity=ai.raw_severity if ai.raw_severity in ("LOW", "MEDIUM", "HIGH", "CRITICAL") else "HIGH",
+                    confidence_score=ai.confidence_score if ai.confidence_score is not None else 0.85,
+                    cited_evidence_keys=ai.cited_evidence_keys if isinstance(ai.cited_evidence_keys, list) else [],
+                    explanation=(ai.explanation or "Re-evaluated via RETRY_AI trigger.")[:500],
+                )
+                gr = apply_guardrails(
+                    rule_level=alert.rule_level,
+                    llm=llm_repr,
+                    valid_dot_keys=valid_keys,
+                    injection_suspect=injection,
+                )
+                ai.effective_verdict = gr.effective_verdict
+                ai.effective_severity = gr.effective_severity
+                ai.safety_floor_triggered = gr.safety_floor_triggered
+                ai.abstention_triggered = gr.abstention_triggered
+                ai.guardrail_audit_note = gr.guardrail_audit_note
+                if gr.abstention_triggered:
+                    alert.status = "NEEDS_MANUAL_TRIAGE"
+                else:
+                    alert.status = "AWAITING_ANALYST"
+            except Exception:
+                pass  # Non-blocking if executing in decoupled worker mode
 
     alert.updated_at = datetime.now(timezone.utc)
 
-    # If OVERRIDE, dynamically create feedback exemplar (FR-4)
-    if action == "OVERRIDE":
+    # Handle final disposition on APPROVE (accepts AI verdict/severity or enforces binary choice on NEEDS_ANALYST_REVIEW)
+    if action == "APPROVE":
+        if prev_verdict == "NEEDS_ANALYST_REVIEW":
+            if not final_verdict or final_verdict not in ("TRUE_POSITIVE", "FALSE_POSITIVE"):
+                if settings.DEMO_MODE:
+                    final_verdict = "TRUE_POSITIVE"
+                else:
+                    raise HTTPException(
+                        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                        detail="HTTP 422: Binary final_verdict ('TRUE_POSITIVE' or 'FALSE_POSITIVE') is required when approving an alert under NEEDS_ANALYST_REVIEW.",
+                    )
+        else:
+            final_verdict = final_verdict or prev_verdict
+        final_severity = final_severity or prev_severity
+
+    # If OVERRIDE, or save_as_exemplar / create_exemplar is True, dynamically create feedback exemplar (FR-4, UC-8)
+    should_create_exemplar = (
+        action == "OVERRIDE"
+        or (
+            action in ("APPROVE", "MANUAL_TRIAGE_CLOSURE", "RESOLVE_ESCALATION")
+            and (payload.get("create_exemplar") is True or payload.get("save_as_exemplar") is True)
+        )
+    )
+    if should_create_exemplar and final_verdict in ("TRUE_POSITIVE", "FALSE_POSITIVE") and final_severity in ("LOW", "MEDIUM", "HIGH", "CRITICAL") and len(rationale) >= 10:
         asset = db.query(Asset).filter(Asset.agent_id == alert.agent_id).first()
         exemplar = FeedbackExemplar(
             source_alert_id=alert.id,
@@ -501,7 +565,7 @@ def submit_alert_decision(
         db.add(exemplar)
         exemplar_created = True
 
-    # Record immutable audit entry
+    # Record immutable audit entry (SRS §7.2.1: NULL for ESCALATE and RETRY_AI)
     audit_id = uuid.uuid4()
     audit_record = AnalystDecisionAudit(
         id=audit_id,
@@ -510,8 +574,8 @@ def submit_alert_decision(
         action_taken=action,
         previous_verdict=prev_verdict,
         previous_severity=prev_severity,
-        final_verdict=final_verdict or (prev_verdict if action == "APPROVE" else None),
-        final_severity=final_severity or (prev_severity if action == "APPROVE" else None),
+        final_verdict=final_verdict if action not in ("ESCALATE", "RETRY_AI") else None,
+        final_severity=final_severity if action not in ("ESCALATE", "RETRY_AI") else None,
         rationale=rationale,
         exemplar_created=exemplar_created,
     )

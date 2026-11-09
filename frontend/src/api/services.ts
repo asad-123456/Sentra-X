@@ -1017,4 +1017,43 @@ export function generateEvaluationReportMarkdown(report: EvaluationReport): stri
   return lines.join('\n');
 }
 
+export async function exportEvaluationMarkdown(): Promise<string> {
+  if (isLiveBackendConfigured()) {
+    return apiClient<string>('/api/v1/evaluation/export-md');
+  }
+  const report = await getBenchmarkReport();
+  return generateEvaluationReportMarkdown(report);
+}
+
+export async function exportEvaluationCsv(): Promise<string> {
+  if (isLiveBackendConfigured()) {
+    return apiClient<string>('/api/v1/evaluation/export-csv');
+  }
+  const report = await getBenchmarkReport();
+  const rows = [
+    ['Metric Name', 'Baseline Raw LLM Value', 'Sentra-X Value', 'Research Delta', 'NFR-3 Target Met'],
+    ...report.comparative_metrics.map((m) => [
+      `"${m.metric_name.replace(/"/g, '""')}"`,
+      `"${m.baseline_value.replace(/"/g, '""')}"`,
+      `"${m.sentrax_value.replace(/"/g, '""')}"`,
+      `"${m.research_delta.replace(/"/g, '""')}"`,
+      m.is_target_met ? 'YES' : 'NO',
+    ]),
+    [],
+    ['Payload ID', 'Category', 'Target Field', 'Adversarial Payload', 'Baseline Verdict', 'Baseline Bypassed', 'Sentra-X Verdict', 'Sentra-X Bypassed', 'Defense Mechanism'],
+    ...report.adversarial_suite.map((p) => [
+      p.id,
+      `"${p.category.replace(/"/g, '""')}"`,
+      `"${p.target_field.replace(/"/g, '""')}"`,
+      `"${p.payload.replace(/"/g, '""')}"`,
+      `"${p.baseline_verdict.replace(/"/g, '""')}"`,
+      p.baseline_bypassed ? 'YES' : 'NO',
+      `"${p.sentrax_verdict.replace(/"/g, '""')}"`,
+      p.sentrax_bypassed ? 'YES' : 'NO',
+      `"${p.defense_mechanism.replace(/"/g, '""')}"`,
+    ]),
+  ];
+  return rows.map((r) => r.join(',')).join('\n');
+}
+
 

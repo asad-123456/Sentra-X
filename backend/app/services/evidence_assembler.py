@@ -59,7 +59,7 @@ class EvidencePack:
     pack: dict                      # -> evidence_packs.pack_json
     valid_dot_keys: list[str]       # -> evidence_packs.valid_dot_keys
     injection_suspect: bool         # -> evidence_packs.injection_suspect
-    injected_exemplar_ids: list[int]  # -> evidence_packs.injected_exemplar_ids
+    injected_exemplar_ids: list[int | str]  # -> evidence_packs.injected_exemplar_ids
     findings: list[str] = field(default_factory=list)  # logging/debug only
 
 
@@ -209,7 +209,7 @@ def assemble_evidence_pack(
     alert: AlertRecord,
     criticality_tier: str | None,
     candidate_alerts: Sequence[CorrelatedAlert] = (),
-    exemplar_ids: Sequence[int] = (),
+    exemplar_ids: Sequence[int | str] = (),
     k: int = MAX_CORRELATED,
     window: timedelta = CORRELATION_WINDOW,
 ) -> EvidencePack:

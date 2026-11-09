@@ -207,7 +207,10 @@ def update_asset_criticality(
 
     tier = payload.get("criticality_tier")
     if not tier or tier not in ("LOW", "MEDIUM", "HIGH", "CRITICAL"):
-        raise HTTPException(status_code=400, detail="Invalid criticality_tier.")
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"HTTP 422: Invalid criticality_tier '{tier}'. Must be one of: 'LOW', 'MEDIUM', 'HIGH', 'CRITICAL'.",
+        )
 
     asset.criticality_tier = tier
     asset.updated_at = datetime.now(timezone.utc)

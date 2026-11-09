@@ -33,7 +33,7 @@ MAX_RETRIES = 3
 BACKOFF_SECONDS = (1.0, 2.0, 4.0)
 MAX_RATIONALE_CHARS = 500
 DEFAULT_GEMINI_MODEL = "gemini-3.1-flash-lite"
-DEFAULT_CLAUDE_MODEL = "claude-haiku-5-5"
+DEFAULT_CLAUDE_MODEL = "claude-3-5-haiku-20241022"
 
 
 # --- errors -----------------------------------------------------------------
@@ -70,7 +70,7 @@ class LLMHTTPError(LLMCallError):
 class InjectedExemplar:
     """One FR-4 exemplar as it reaches the prompt builder (Atta's lookup returns these)."""
 
-    id: int
+    id: int | str
     match_tier: Literal["Tier 1", "Tier 2"]
     rule_id: str
     process_signature: str | None
@@ -325,7 +325,10 @@ class GeminiAdapter(LLMAdapter):
             if translated is None:
                 raise
             raise translated from exc
-        text = response.text
+        try:
+            text = response.text
+        except Exception as exc:
+            raise LLMSchemaError(f"failed to read Gemini response text (safety filter block): {exc}") from exc
         if not text:
             raise LLMSchemaError("empty response (possibly blocked by a safety filter)")
         return text
@@ -402,12 +405,14 @@ def get_adapter(provider: str | None = None) -> LLMAdapter:
             gullible=os.getenv("MOCK_GULLIBLE", "").strip().lower() in ("1", "true", "yes"),
         )
     if name == "gemini":
-        key = os.getenv("GEMINI_API_KEY", "").strip()
+        from app.config import settings
+        key = (settings.GEMINI_API_KEY or os.getenv("GEMINI_API_KEY", "")).strip()
         if not key:
             raise ValueError("GEMINI_API_KEY is not set")
         return GeminiAdapter(key, os.getenv("GEMINI_MODEL") or DEFAULT_GEMINI_MODEL)
     if name in ("claude", "anthropic"):
-        key = os.getenv("ANTHROPIC_API_KEY", "").strip()
+        from app.config import settings
+        key = (settings.ANTHROPIC_API_KEY or os.getenv("ANTHROPIC_API_KEY", "")).strip()
         if not key:
             raise ValueError("ANTHROPIC_API_KEY is not set")
         return ClaudeAdapter(key, os.getenv("ANTHROPIC_MODEL") or DEFAULT_CLAUDE_MODEL)
