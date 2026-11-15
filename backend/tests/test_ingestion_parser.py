@@ -83,9 +83,16 @@ def test_noise_below_threshold():
     assert parse_alert(make_alert(level=3)).status == "noise"
 
 
-@pytest.mark.parametrize("level", [16, -1, None, "abc"])
-def test_invalid_level(level):
-    assert parse_alert(make_alert(level=level)).status == "invalid"
+@pytest.mark.parametrize("level,clamped", [(16, 15), (99, 15), (-1, 0), (None, 0), ("abc", 0)])
+def test_unusable_level_is_kept_clamped_and_flagged(level, clamped):
+    out = parse_alert(make_alert(level=level))
+    assert out.status == "accepted"  # never silently dropped, not treated as noise either
+    assert out.alert.rule_level == clamped and out.alert.needs_manual_triage
+    assert out.alert.raw_payload["rule"]["level"] == level  # original preserved
+
+
+def test_normal_level_not_flagged():
+    assert not parse_alert(make_alert(level=7)).alert.needs_manual_triage
 
 
 def test_level_as_string_is_accepted():

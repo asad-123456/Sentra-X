@@ -23,23 +23,24 @@ class IngestSummary:
     inserted: int = 0
     db_duplicates: int = 0
     assets_registered: int = 0
+    manual_triage: int = 0  # stored with an unusable rule.level, NEEDS_MANUAL_TRIAGE, not queued
 
 
 def ingest_raws(session_factory, raws: Iterable[dict], min_level: Optional[int] = None) -> IngestSummary:
     level = get_wazuh_settings().WAZUH_MIN_LEVEL if min_level is None else min_level
     batch = process_batch(raws, level)
-    new_ids, assets_new = [], 0
+    queued, manual, assets_new = [], [], 0
     if batch.alerts:
         with session_factory.begin() as session:  # one transaction, commits on exit
-            new_ids, assets_new = persist_alerts(session, batch.alerts)
-    for alert_id in new_ids:  # enqueue only AFTER the commit succeeded
+            queued, manual, assets_new = persist_alerts(session, batch.alerts)
+    for alert_id in queued:  # enqueue only AFTER the commit succeeded
         enqueue_triage(alert_id)
     s = batch.stats
     summary = IngestSummary(
         received=s.received, noise=s.noise, invalid=s.invalid,
         duplicate_in_batch=s.duplicate_in_batch, accepted=s.accepted,
-        inserted=len(new_ids), db_duplicates=s.accepted - len(new_ids),
-        assets_registered=assets_new,
+        inserted=len(queued) + len(manual), db_duplicates=s.accepted - len(queued) - len(manual),
+        assets_registered=assets_new, manual_triage=len(manual),
     )
     log.info("ingest batch: %s", summary)
     return summary

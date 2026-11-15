@@ -170,3 +170,16 @@ def test_webhook_accepts_good_and_rejects_bad(factory, monkeypatch):
         assert count(factory) == 1
     finally:
         app.dependency_overrides.clear()
+
+
+@pytest.mark.parametrize("bad_level,stored", [(99, 15), (-3, 0)])
+def test_unusable_level_stored_clamped_as_manual_triage_and_not_queued(factory, bad_level, stored):
+    raw = one_alert()
+    raw["rule"]["level"] = bad_level
+    summary = ingest_raws(factory, [raw])
+    assert summary.inserted == 1 and summary.manual_triage == 1 and summary.noise == 0
+    with factory() as s:
+        row = s.execute(text("SELECT rule_level, status, raw_payload FROM alerts")).mappings().one()
+    assert row["rule_level"] == stored and row["status"] == "NEEDS_MANUAL_TRIAGE"
+    assert row["raw_payload"]["rule"]["level"] == bad_level  # original kept in raw_payload
+    assert triage_queue.qsize() == 0  # a human decides; the AI worker never sees it

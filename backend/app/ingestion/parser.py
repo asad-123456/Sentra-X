@@ -106,6 +106,9 @@ class ParsedAlert:
     alert_timestamp: datetime
     mitre_tactics: list = field(default_factory=list)
     mitre_techniques: list = field(default_factory=list)
+    # True when rule.level was missing, not a number, or outside 0-15. The alert is kept (never silently
+    # dropped), the level is clamped into 0-15 (the original stays in raw_payload) and it goes to manual triage.
+    needs_manual_triage: bool = False
 
 
 @dataclass(frozen=True)
@@ -120,13 +123,14 @@ def parse_alert(raw: Any, min_level: int = 4) -> ParseOutcome:
     if not isinstance(raw, dict):
         return ParseOutcome("invalid", reason="alert is not an object")
 
+    needs_manual = False
     try:
         level = int(get_path(raw, "rule.level"))
-    except (TypeError, ValueError):
-        return ParseOutcome("invalid", reason="rule.level missing or not a number")
+    except (TypeError, ValueError, OverflowError):
+        level, needs_manual = 0, True  # unusable level: keep the alert, send it to a human
     if not 0 <= level <= 15:
-        return ParseOutcome("invalid", reason=f"rule.level {level} outside 0-15")
-    if level < min_level:
+        level, needs_manual = max(0, min(15, level)), True
+    if not needs_manual and level < min_level:
         return ParseOutcome("noise", reason=f"level {level} < {min_level}")
 
     alert_id = get_path(raw, "id")
@@ -170,5 +174,6 @@ def parse_alert(raw: Any, min_level: int = 4) -> ParseOutcome:
         alert_timestamp=ts,
         mitre_tactics=tactics,
         mitre_techniques=techniques,
+        needs_manual_triage=needs_manual,
     )
     return ParseOutcome("accepted", alert=alert)
