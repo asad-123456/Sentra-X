@@ -218,7 +218,7 @@ export const AlertDetailModal: React.FC<AlertDetailModalProps> = ({
               {/* Right Pane: 3-Tab Evidence Tree & Prompt Inspector */}
               <EvidenceTreePane
                 evidencePack={detail.evidence_pack}
-                citedEvidenceKeys={detail.assessment.cited_evidence_keys}
+                citedEvidenceKeys={(detail.assessment || detail.ai_assessment)?.cited_evidence_keys || []}
                 selectedCitationKey={selectedCitationKey}
               />
             </div>
@@ -244,7 +244,7 @@ export const AlertDetailModal: React.FC<AlertDetailModalProps> = ({
             {/* Sticky Action Footer */}
             <DecisionActionPanel
               alert={detail.alert}
-              assessment={detail.assessment}
+              assessment={detail.assessment || detail.ai_assessment}
               userRole={user?.role || 'Analyst'}
               isSubmitting={isSubmitting}
               onSubmitDecision={handleSubmitDecision}

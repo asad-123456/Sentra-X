@@ -35,9 +35,16 @@ export const LoginView: React.FC = () => {
     }
   };
 
-  const handleQuickRole = (role: UserRole) => {
-    switchDemoRole(role);
-    navigate(from, { replace: true });
+  const handleQuickRole = async (role: UserRole) => {
+    setErrorBanner(null);
+    try {
+      await switchDemoRole(role);
+      navigate(from, { replace: true });
+    } catch (err: unknown) {
+      setErrorBanner(
+        err instanceof Error ? err.message : `Failed to authenticate live user for role '${role}'.`
+      );
+    }
   };
 
   return (

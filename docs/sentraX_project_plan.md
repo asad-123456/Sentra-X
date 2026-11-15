@@ -17,10 +17,8 @@
     break-before: avoid-page !important;
   }
   .mermaid svg {
-    max-width: 98% !important;
-    max-height: 280px !important;
+    max-width: 100% !important;
     height: auto !important;
-    width: auto !important;
     display: block;
     margin: 0 auto !important;
   }
@@ -39,7 +37,7 @@
 | **Institution** | Department of Computer and Information Systems Engineering, NED University of Engineering & Technology |
 | **Authors / Project Team** | Asad Ullah Zafar (CS-24082), Atta Ur Rehman (CS-24092), Abdur Rehman (CS-24098) |
 | **Submitted To / Supervisors** | Mr. Muhammad Ali Akhtar — Practical Class Teacher (DDL Lab, Mr. Khurram Alvi) & Dr. Fakhra Aftab — Theory Class Teacher |
-| **Companion Specification** | Sentra-X Software Requirements Specification (SRS v1.3) |
+| **Companion Specification** | Sentra-X Software Requirements Specification (SRS v1.4) & Software Design Document (SDD v1.0) |
 
 ---
 

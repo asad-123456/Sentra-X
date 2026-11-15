@@ -1,0 +1,41 @@
+from __future__ import annotations
+
+from enum import Enum
+
+
+class AlertStatus(str, Enum):
+    PENDING_REVIEW = "PENDING_REVIEW"
+    AWAITING_ANALYST = "AWAITING_ANALYST"
+    NEEDS_MANUAL_TRIAGE = "NEEDS_MANUAL_TRIAGE"
+    ESCALATED = "ESCALATED"
+    CLOSED = "CLOSED"
+
+
+class Verdict(str, Enum):
+    TRUE_POSITIVE = "TRUE_POSITIVE"
+    FALSE_POSITIVE = "FALSE_POSITIVE"
+    NEEDS_ANALYST_REVIEW = "NEEDS_ANALYST_REVIEW"
+
+
+class Severity(str, Enum):
+    LOW = "LOW"
+    MEDIUM = "MEDIUM"
+    HIGH = "HIGH"
+    CRITICAL = "CRITICAL"
+
+
+class AssetCriticality(str, Enum):
+    LOW = "LOW"
+    MEDIUM = "MEDIUM"
+    HIGH = "HIGH"
+    CRITICAL = "CRITICAL"
+
+
+class DecisionAction(str, Enum):
+    APPROVE = "APPROVE"
+    OVERRIDE = "OVERRIDE"
+    ESCALATE = "ESCALATE"
+    RETRY_AI = "RETRY_AI"
+    MANUAL_TRIAGE_CLOSURE = "MANUAL_TRIAGE_CLOSURE"
+    RESOLVE_ESCALATION = "RESOLVE_ESCALATION"
+
