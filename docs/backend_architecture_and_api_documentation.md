@@ -58,6 +58,7 @@ Sentra-X is an evidence-grounded, uncertainty-aware decision-support copilot bui
 | **Data Validation** | **Pydantic (v2)** | `≥ 2.9.0` | High-performance Rust-backed data validation, strict serialization matching TypeScript types 1:1. |
 | **Security & Auth** | **python-jose + bcrypt** | `3.3.0` / `5.0.0` | RFC 7519 Bearer JWT authentication, salted bcrypt password verification (`cost ≥ 10`). |
 | **Async Concurrency** | **greenlet** | `≥ 3.1.1` | Coroutine concurrency for SQLAlchemy async session orchestration. |
+| **LLM Provider SDK** | **google-genai** | `≥ 0.1.1` | Official Google GenAI SDK powering Gemini 2.5/3.1 flash LLM adapter for live SOC triage inference. |
 | **Testing Harness** | **Starlette TestClient + httpx** | `≥ 0.28.1` | In-memory integration testing across all 21 REST endpoints with zero mock dependencies. |
 
 ```
@@ -80,10 +81,11 @@ Sentra-X is an evidence-grounded, uncertainty-aware decision-support copilot bui
 │  • Async SessionLocal:   postgresql+psycopg_async://sentrax:***        │
 ├──────────────────────────────────────────────────┼─────────────────────┤
 │  PostgreSQL 16 Engine                            Port: 5432 (Local)    │
-│  • 7 Core Tables: users, assets, alerts, evidence_packs, assessments,  │
-│                   analyst_decisions_audit, feedback_exemplars          │
+│  • 8 Core Tables: users, assets, alerts, evidence_packs, assessments,  │
+│                   analyst_decisions_audit, feedback_exemplars,         │
+│                   system_configurations                                │
 │  • Partial Index: ix_exemplars_retrieval (< 50ms few-shot lookup)      │
-│  • Immutability:  trg_audit_immutability (Blocks UPDATE/DELETE on audit)│
+│  • Triggers:      trg_audit_immutability & trg_sync_feedback_exemplar  │
 └────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -95,10 +97,11 @@ Sentra-X is an evidence-grounded, uncertainty-aware decision-support copilot bui
 c:\projects\SentraX\backend\
 ├── alembic/
 │   ├── versions/
-│   │   ├── 0001_initial_schema.py            # Authoritative 7-table DDL, 8 indexes, and immutability trigger
+│   │   ├── 0001_initial_schema.py            # Authoritative initial DDL, 8 indexes, and immutability trigger
 │   │   ├── 0002_align_srs_v14.py             # SRS v1.4 column alignments & revocation tracking
 │   │   ├── 0003_add_srs_check_constraints.py # Enforces all 12 SRS check constraints & FK relations
-│   │   └── 0004_add_system_configurations.py # Provisions system_configurations table for multi-worker persistence
+│   │   ├── 0004_add_system_configurations.py # Provisions system_configurations table for multi-worker persistence
+│   │   └── 0005_abr_audit_hardening.py       # Hardens schema: nullability relaxations, correlation indexes, exemplar trigger
 │   └── env.py                                # Synchronous Alembic environment referencing pydantic-settings
 ├── alembic.ini                               # Alembic CLI configuration (sys.path and logging)
 ├── app/
@@ -110,7 +113,7 @@ c:\projects\SentraX\backend\
 │   ├── demo_seed.json                        # Authentic exported SOC telemetry dataset (34 KB)
 │   ├── seed_data.py                          # Idempotent database seeder (populating all 8 tables)
 │   ├── main.py                               # FastAPI application factory, CORS, exception handler, health check
-│   ├── models/                               # SQLAlchemy 2.0 Declarative Models
+│   ├── models/                               # SQLAlchemy 2.0 Declarative Models (All 8 Tables)
 │   │   ├── __init__.py
 │   │   ├── base.py                           # DeclarativeBase
 │   │   ├── user.py                           # User account & RBAC role entity
@@ -151,8 +154,8 @@ c:\projects\SentraX\backend\
 │   ├── reset_db.py                           # Truncates tables & re-seeds baseline for demonstration
 │   └── wipe_db.py                            # Safe schema-preserving database purge
 ├── tests/
-│   ├── test_db_schema.py                     # Verifies 7 tables, 8 indexes, 12 constraints & immutability trigger
-│   ├── test_api_endpoints.py                 # 16 automated integration tests covering REST endpoints & RBAC
+│   ├── test_db_schema.py                     # Verifies all 8 tables, indexes, 12 constraints & immutability triggers
+│   ├── test_api_endpoints.py                 # Automated integration tests covering REST endpoints & RBAC
 │   ├── test_evidence_assembler.py            # Unit tests for evidence pack dot-key extraction & correlation
 │   ├── test_prompt_sanitizer.py              # Unit tests for prompt injection neutralization & role delimiters
 │   ├── test_rules_engine.py                  # Unit tests for deterministic guardrails & safety floors
@@ -269,6 +272,19 @@ classDiagram
         +DateTime created_at
     }
 
+    class SystemConfiguration {
+        +Integer id
+        +String active_llm_provider
+        +String active_model_name
+        +Float temperature
+        +Integer max_tokens
+        +Boolean safety_floor_enabled
+        +Boolean abstention_enabled
+        +Integer exemplar_injection_k
+        +DateTime updated_at
+        +UUID updated_by
+    }
+
     Asset "1" --> "0..*" Alert : generates
     Alert "1" --> "0..1" EvidencePack : compiles_into
     Alert "1" --> "0..1" AIAssessment : evaluates_to
@@ -276,6 +292,7 @@ classDiagram
     Alert "1" --> "0..*" FeedbackExemplar : calibrates
     User "1" --> "0..*" AnalystDecisionAudit : executes
     User "1" --> "0..*" FeedbackExemplar : authors
+    User "0..1" --> "0..*" SystemConfiguration : configures
 ```
 
 ### 4.2 Key Architectural Decisions (ADR Alignment)
@@ -329,6 +346,30 @@ def validate_override_rationale(self) -> DecisionRequestDTO:
 ```
 * Attempting an override with less than 10 characters returns **`HTTP 422 Unprocessable Content`**.
 * Submitting a valid override automatically inserts a new active exemplar into `feedback_exemplars` (`exemplar_created = TRUE`), immediately feeding future triage prompts.
+
+### 5.3 Author Synchronization Trigger (`trg_sync_feedback_exemplar_user`, Migration 0005)
+To prevent foreign key desynchronization and guarantee non-repudiation when human overrides create feedback calibration exemplars, PostgreSQL trigger `trg_sync_feedback_exemplar_user` automatically synchronizes `created_by` on `feedback_exemplars` directly from `analyst_decisions_audit.user_id`:
+
+```sql
+CREATE OR REPLACE FUNCTION sync_feedback_exemplar_user()
+RETURNS TRIGGER AS $$
+BEGIN
+    IF NEW.source_alert_id IS NOT NULL AND NEW.created_by IS NULL THEN
+        SELECT user_id INTO NEW.created_by
+        FROM analyst_decisions_audit
+        WHERE alert_id = NEW.source_alert_id
+        ORDER BY created_at DESC
+        LIMIT 1;
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_sync_feedback_exemplar_user
+BEFORE INSERT OR UPDATE ON feedback_exemplars
+FOR EACH ROW
+EXECUTE FUNCTION sync_feedback_exemplar_user();
+```
 
 ---
 

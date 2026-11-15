@@ -84,7 +84,7 @@ Threat actors frequently attempt to manipulate LLM triage by embedding system ov
 | | **Migrations** | **Alembic** `≥ 1.13.3` | Version-controlled DDL migrations, partial indexes, and immutability trigger scripts. |
 | | **Validation** | **Pydantic** `≥ 2.9.0` | Rust-backed request/response serialization enforcing 13 database domain constraints. |
 | | **Authentication** | **python-jose** + **bcrypt** | RFC 7519 Bearer JWT authentication, salted bcrypt password verification (`cost ≥ 10`). |
-| | **LLM Adapters** | Google GenAI SDK / Anthropic SDK | Official SDKs for Gemini (`gemini-2.5-flash`) and Claude (`claude-3-5-sonnet`) with 10s timeouts. |
+| | **LLM Adapters** | **google-genai** (`≥ 0.1.1`) / Anthropic SDK | Official Google GenAI SDK for Gemini (`gemini-2.5-flash`, `gemini-3.1-flash-lite`) & Claude adapter with retry backoff. |
 | **Database** | **PostgreSQL** | `16.x` | Relational storage, partial indexing, foreign key cascade policies, and PL/pgSQL immutability triggers. |
 
 ---
@@ -95,11 +95,12 @@ Threat actors frequently attempt to manipulate LLM triage by embedding system ov
 SentraX/
 ├── .gitignore                   # Ignores .venv, node_modules, build dist, credentials, and scratch logs
 ├── README.md                    # Root technical architecture, quickstart, and benchmark guide
+├── docker-compose.yml           # Multi-container orchestration (PostgreSQL 16, FastAPI backend, Vite frontend)
 ├── backend/                     # FastAPI Application & PostgreSQL Persistence Layer
-│   ├── alembic/                 # Database migrations (0001 initial, 0002 srs v1.4 parity, 0003 check constraints)
+│   ├── alembic/                 # Database migrations (0001 initial, 0002 srs parity, 0003 constraints, 0004 config, 0005 hardening)
 │   ├── alembic.ini              # Alembic environment and configuration
 │   ├── app/                     # Backend application package
-│   │   ├── models/              # SQLAlchemy 2.0 declarative models (User, Asset, Alert, EvidencePack, etc.)
+│   │   ├── models/              # SQLAlchemy 2.0 declarative models (User, Asset, Alert, EvidencePack, SystemConfig, etc.)
 │   │   ├── routers/             # API routers: auth, alerts, analytics, governance, evaluation, admin
 │   │   ├── schemas/             # Pydantic v2 schemas validating request/response contracts
 │   │   ├── services/            # Core business logic: rules_engine, prompt_sanitizer, evidence_assembler, llm_adapter
@@ -108,17 +109,17 @@ SentraX/
 │   │   ├── database.py          # Sync & async SQLAlchemy engine session factories
 │   │   ├── demo_seed.json       # Authoritative SRS v1.4 SOC baseline telemetry dataset
 │   │   ├── main.py              # FastAPI application factory and CORS configuration
-│   │   ├── seed_data.py         # Deterministic seeder populating baseline users, assets, and alerts
+│   │   ├── seed_data.py         # Deterministic seeder populating all 8 tables
 │   │   └── utils.py             # Shared parsing utilities (e.g., parse_uuid)
 │   ├── scripts/                 # Operational database administration scripts
 │   │   ├── reset_db.py          # Idempotently truncates and reseeds database to pristine baseline
 │   │   └── wipe_db.py           # Safely wipes operational data while preserving schema and users
 │   ├── tests/                   # Integration and schema verification suites
-│   │   ├── test_api_endpoints.py # End-to-end integration suite covering all 16 active REST endpoints
-│   │   ├── test_db_schema.py    # Direct database test verifying 13 table CHECK constraints
+│   │   ├── test_api_endpoints.py # End-to-end integration suite covering all 20+ REST API endpoints across 6 routers
+│   │   ├── test_db_schema.py    # Direct database test verifying all 8 tables, indexes, constraints & triggers
 │   │   ├── test_rules_engine.py # Unit tests for safety floors and abstention policies
 │   │   └── test_prompt_sanitizer.py # Unit tests for prompt injection neutralization
-│   ├── requirements.txt         # Pinned Python package dependencies
+│   ├── requirements.txt         # Pinned Python package dependencies (including google-genai)
 │   └── .env.example             # Template for PostgreSQL credentials and JWT secrets
 ├── frontend/                    # React 19 / TypeScript / Vite Single-Page Application
 │   ├── src/
@@ -261,10 +262,10 @@ python backend/scripts/reset_db.py
 # 2. Wipe operational data while preserving schema, tables, and admin users:
 python backend/scripts/wipe_db.py
 
-# 3. Run complete 16-endpoint REST API integration test suite:
+# 3. Run complete 20+ endpoint REST API integration test suite:
 python backend/tests/test_api_endpoints.py
 
-# 4. Verify all 13 PostgreSQL CHECK constraints directly against the engine:
+# 4. Verify all 8 tables, 13 PostgreSQL CHECK constraints, indexes, and triggers:
 pytest backend/tests/test_db_schema.py
 ```
 

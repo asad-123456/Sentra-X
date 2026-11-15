@@ -22,9 +22,10 @@
    * [3.5 Table: `ai_assessments` (LLM Triage & Guardrail Dispositions)](#35-table-ai_assessments-llm-triage--guardrail-dispositions)
    * [3.6 Table: `analyst_decisions_audit` (Immutable Tamper-Evident Log)](#36-table-analyst_decisions_audit-immutable-tamper-evident-log)
    * [3.7 Table: `feedback_exemplars` (Dynamic Few-Shot Calibration)](#37-table-feedback_exemplars-dynamic-few-shot-calibration)
+   * [3.8 Table: `system_configurations` (Thread-Safe Multi-Worker Settings)](#38-table-system_configurations-thread-safe-multi-worker-settings)
 4. [High-Speed Indexing Architecture & Latency Guarantees](#4-high-speed-indexing-architecture--latency-guarantees)
 5. [Foreign Key Constraints, Cascade Rules & Integrity Policies](#5-foreign-key-constraints-cascade-rules--integrity-policies)
-6. [PostgreSQL Immutability Trigger Implementation (`trg_audit_immutability`)](#6-postgresql-immutability-trigger-implementation-trg_audit_immutability)
+6. [PostgreSQL Triggers & Immutability Architecture (`trg_audit_immutability`, `trg_sync_feedback_exemplar_user`)](#6-postgresql-immutability-trigger-implementation-trg_audit_immutability)
 7. [Dual-Upsert Pattern & Idempotent Retry AI Lifecycle (ADR 8.5)](#7-dual-upsert-pattern--idempotent-retry-ai-lifecycle-adr-85)
 8. [Database Driver Topology (Psycopg v3 Sync & Async)](#8-database-driver-topology-psycopg-v3-sync--async)
 
@@ -207,7 +208,7 @@ Maintains host criticality tiers for monitored Wazuh agents (`FR-9`).
 | :--- | :--- | :---: | :--- | :--- |
 | `agent_id` | `VARCHAR(64)` | No | `PRIMARY KEY` | Authentic Wazuh Agent ID string (e.g. `'001'`), enabling 0-translation joins with SIEM events. |
 | `hostname` | `VARCHAR(255)` | No | None | Fully qualified domain name or machine hostname. |
-| `ip_address` | `VARCHAR(45)` | No | IPv4 or IPv6 representation | Primary interface IP address. |
+| `ip_address` | `VARCHAR(45)` | Yes | IPv4 or IPv6 representation | Primary interface IP address (nullable per migration 0005 to support auto-registered cloud agents). |
 | `criticality_tier`| `VARCHAR(16)` | No | `DEFAULT 'MEDIUM'`, `CHECK (criticality_tier IN ('LOW', 'MEDIUM', 'HIGH', 'CRITICAL'))` | Business asset tier injected into Evidence Pack (`FR-2`) and Tier 2 fallback matching (`FR-4`). |
 | `description` | `TEXT` | Yes | None | Operational context (e.g., "Primary Active Directory DC"). |
 | `updated_by` | `UUID` | Yes | `FOREIGN KEY (updated_by) REFERENCES users(id) ON DELETE SET NULL` | ID of the Team Lead or Admin who updated the tier (`FR-9`, AC-17). `NULL` when auto-registered. |
@@ -313,17 +314,37 @@ Few-shot calibration store enabling in-context learning without model retraining
 | `id` | `SERIAL` (`INT`) | No | `PRIMARY KEY`, `AUTOINCREMENT` | Integer autoincrement PK (Decision 8.4) for high-speed retrieval. |
 | `source_alert_id`| `UUID` | Yes | `FOREIGN KEY (source_alert_id) REFERENCES alerts(id) ON DELETE SET NULL` | Provenance link to alert where override occurred. |
 | `rule_id` | `VARCHAR(32)` | No | None | Wazuh detection signature ID targeted by calibration. |
-| `process_signature`| `TEXT` | No | None | Normalized process/script string for Tier 1 signature matching. |
+| `process_signature`| `TEXT` | Yes | None | Normalized process/script string for Tier 1 signature matching (nullable per migration 0005 for network/firewall events). |
 | `asset_criticality`| `VARCHAR(16)`| No | `CHECK (asset_criticality IN ('LOW', 'MEDIUM', 'HIGH', 'CRITICAL'))` | Host tier for Tier 2 fallback matching. |
 | `calibrated_verdict`| `VARCHAR(32)`| No | `CHECK (calibrated_verdict IN ('TRUE_POSITIVE', 'FALSE_POSITIVE'))` | Human-corrected authoritative ground truth. |
 | `calibrated_severity`| `VARCHAR(16)`| No | `CHECK (calibrated_severity IN ('LOW', 'MEDIUM', 'HIGH', 'CRITICAL'))` | Human-corrected authoritative severity. |
 | `rationale` | `TEXT` | No | Character length $\ge 10$ chars | Analyst justification injected into prompt context. |
 | `is_active` | `BOOLEAN` | No | `DEFAULT TRUE` | Team Lead revocation switch. Inactive exemplars excluded from future prompt retrieval (`AC-9`). |
 | `match_hit_count` | `INTEGER` | No | `DEFAULT 0` | Hit counter incremented whenever exemplar is selected in context. |
-| `created_by` | `UUID` | Yes | `FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL` | Analyst who authored the override (`user_id` in SRS v1.4). |
+| `created_by` | `UUID` | Yes | `FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL` | Analyst who authored the override (`user_id` in SRS v1.4, synchronized via trigger). |
 | `revoked_by` | `UUID` | Yes | `FOREIGN KEY (revoked_by) REFERENCES users(id) ON DELETE SET NULL` | Team Lead who revoked this exemplar (`FR-4`, §6.5 Sequence 2). |
 | `revoked_at` | `TIMESTAMPTZ` | Yes | None | Timestamp when revocation was executed. |
 | `created_at` | `TIMESTAMPTZ` | No | `DEFAULT NOW()` | Creation timestamp. |
+
+---
+
+### 3.8 Table: `system_configurations` (Thread-Safe Multi-Worker Settings)
+Maintains singleton system-wide operational parameters (Alembic migration `0004_add_system_configurations.py`) ensuring thread-safety and persistent state synchronization across multi-worker Uvicorn instances and container replicas.
+
+| Column Name | SQL Type | Nullable | Default / Constraints | Operational Purpose |
+| :--- | :--- | :---: | :--- | :--- |
+| `id` | `INTEGER` | No | `PRIMARY KEY`, `AUTOINCREMENT` | Singleton record ID (`1`). |
+| `wazuh_endpoint` | `VARCHAR(255)` | No | `'https://wazuh-master.sentrax.internal:55000'` | Active Wazuh SIEM API / Manager endpoint URL. |
+| `wazuh_status` | `VARCHAR(32)` | No | `'CONNECTED'` | Wazuh SIEM health indicator (`CONNECTED`, `DEGRADED`, `OFFLINE`). |
+| `polling_interval_seconds` | `INTEGER` | No | `30` | Ingestion daemon polling frequency. |
+| `min_rule_level` | `INTEGER` | No | `4` | Ingestion threshold ($L_{\min} \ge 4$). Events below this level are ignored. |
+| `llm_provider` | `VARCHAR(32)` | No | `'Gemini'` | Active AI copilot provider (`Gemini`, `Claude`, `Mock`). |
+| `model_name` | `VARCHAR(64)` | No | `'gemini-3.1-flash-lite'` | Model identifier string dispatched to provider SDK. |
+| `abstention_threshold` | `FLOAT` | No | `0.60` | Confidence boundary below which automated verdicts abstain to `NEEDS_ANALYST_REVIEW`. |
+| `max_exemplars_injected` | `INTEGER` | No | `2` | Maximum number of few-shot calibration exemplars injected into prompt envelope. |
+| `last_sync_timestamp` | `TIMESTAMPTZ` | Yes | None | Heartbeat timestamp of last successful SIEM ingestion sync. |
+| `updated_at` | `TIMESTAMPTZ` | No | `DEFAULT NOW()` | Timestamp of last configuration change. |
+
 
 ---
 
@@ -394,6 +415,28 @@ CONTEXT:  PL/pgSQL function prevent_audit_modification() line 3 at RAISE
 
 > [!NOTE] Row-Level Trigger Scope & TRUNCATE Protection
 > PostgreSQL `FOR EACH ROW` triggers do not fire on `TRUNCATE` operations. In production deployments, immutability against table truncation is enforced at the database role level by revoking `TRUNCATE` permissions on `analyst_decisions_audit` from the application database user (`REVOKE TRUNCATE ON analyst_decisions_audit FROM sentrax;`).
+
+### 6.2 Feedback Exemplars Identity Synchronization Trigger (`trg_sync_feedback_exemplar_user`)
+Deployed in Alembic migration `0005_abr_audit_hardening.py` to prevent drift between the canonical SRS v1.4 data dictionary column (`user_id`) and the ORM relationship foreign key (`created_by`):
+
+```sql
+CREATE OR REPLACE FUNCTION sync_feedback_exemplar_user()
+RETURNS TRIGGER AS $$
+BEGIN
+    IF NEW.user_id IS NULL AND NEW.created_by IS NOT NULL THEN
+        NEW.user_id := NEW.created_by;
+    ELSIF NEW.created_by IS NULL AND NEW.user_id IS NOT NULL THEN
+        NEW.created_by := NEW.user_id;
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_sync_feedback_exemplar_user
+BEFORE INSERT OR UPDATE ON feedback_exemplars
+FOR EACH ROW EXECUTE FUNCTION sync_feedback_exemplar_user();
+```
+
 
 
 ---
