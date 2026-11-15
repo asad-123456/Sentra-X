@@ -148,3 +148,29 @@ def test_real_samples_parse():
         if out.status == "accepted":
             assert out.alert.alert_timestamp.utcoffset() == timedelta(0)
             assert out.alert.raw_payload == raw
+
+
+# ---- Asad schema additions: MITRE extraction and length limits ----
+def _raw(**over):
+    base = {"id": "1700000000.1", "timestamp": "2026-10-31T12:05:07.849+0000",
+            "rule": {"id": "5710", "level": 5, "description": "x",
+                     "mitre": {"id": ["T1110.001"], "tactic": ["Credential Access"]}},
+            "agent": {"id": "001", "name": "h", "ip": "10.0.0.1"}}
+    base.update(over)
+    return base
+
+
+def test_mitre_extracted():
+    p = parse_alert(_raw()).alert
+    assert p.mitre_tactics == ["Credential Access"] and p.mitre_techniques == ["T1110.001"]
+
+
+def test_mitre_missing_gives_empty_lists():
+    raw = _raw()
+    del raw["rule"]["mitre"]
+    p = parse_alert(raw).alert
+    assert p.mitre_tactics == [] and p.mitre_techniques == []
+
+
+def test_overlong_alert_id_is_invalid():
+    assert parse_alert(_raw(id="x" * 129)).status == "invalid"

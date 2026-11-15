@@ -9,11 +9,36 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from .config import settings
 from .database import sync_engine
+from contextlib import asynccontextmanager
+
+from .ingestion.db_access import get_session_factory
+from .ingestion.poller import Poller
+from .ingestion.sources import IndexerSource
+from .ingestion.wazuh_settings import get_wazuh_settings
+from .ingestion.webhook import router as webhook_router
 from .routers import admin, alerts, analytics, auth, evaluation, governance
 
 logger = logging.getLogger("sentrax.api")
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Start the Wazuh poller only when WAZUH_INGEST_MODE=poll (Part 4)."""
+    w = get_wazuh_settings()
+    poller = None
+    if w.WAZUH_INGEST_MODE == "poll":
+        poller = Poller(
+            IndexerSource(w.WAZUH_INDEXER_URL, w.WAZUH_INDEXER_USER,
+                          w.WAZUH_INDEXER_PASSWORD, w.WAZUH_VERIFY_TLS),
+            get_session_factory(), w.WAZUH_POLL_INTERVAL_SECONDS, w.WAZUH_MIN_LEVEL,
+        )
+        poller.start()
+    yield
+    if poller:
+        poller.stop()
+
+
 app = FastAPI(
+    lifespan=lifespan,
     title="Sentra-X Security Operations Workspace API",
     version="1.0.0",
     description="Evidence-Grounded and Uncertainty-Aware Human-in-the-Loop SOC Alert Triage Copilot API",
@@ -46,6 +71,7 @@ app.include_router(analytics.router, prefix="/api/v1")
 app.include_router(governance.router, prefix="/api/v1")
 app.include_router(evaluation.router, prefix="/api/v1")
 app.include_router(admin.router, prefix="/api/v1")
+app.include_router(webhook_router)  # Wazuh webhook (Part 4): POST /api/webhooks/wazuh
 
 
 @app.get("/")
