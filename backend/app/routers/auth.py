@@ -9,6 +9,7 @@ from ..auth import create_access_token, get_current_user, verify_password
 from ..config import settings
 from ..database import get_db
 from ..models.user import User
+from ..security_log import security_log
 from ..schemas.auth import LoginRequest, TokenResponse, UserDTO
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
@@ -24,6 +25,7 @@ def _check_rate_limit(client_ip: str) -> None:
     attempts = [t for t in FAILED_LOGIN_ATTEMPTS[client_ip] if now - t < ATTEMPT_WINDOW_SECONDS]
     FAILED_LOGIN_ATTEMPTS[client_ip] = attempts
     if len(attempts) >= MAX_FAILED_ATTEMPTS:
+        security_log.warning("login_rate_limited ip=%s", client_ip)
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail="HTTP 429 Too Many Requests: Rate limit exceeded for login attempts. Please wait 60 seconds.",
@@ -50,6 +52,7 @@ def login(request: LoginRequest, raw_req: Request, db: Session = Depends(get_db)
     )
 
     if not user:
+        security_log.warning("login_failed reason=unknown_user user=%r ip=%s", request.username[:64], client_ip)
         _record_failed_attempt(client_ip)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -69,6 +72,7 @@ def login(request: LoginRequest, raw_req: Request, db: Session = Depends(get_db)
     )
 
     if not is_valid:
+        security_log.warning("login_failed reason=bad_password user=%r ip=%s", request.username[:64], client_ip)
         _record_failed_attempt(client_ip)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -76,6 +80,7 @@ def login(request: LoginRequest, raw_req: Request, db: Session = Depends(get_db)
         )
 
     if not user.is_active:
+        security_log.warning("login_failed reason=inactive_user user=%r ip=%s", request.username[:64], client_ip)
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="HTTP 403 Forbidden: User account is disabled.",
@@ -83,6 +88,7 @@ def login(request: LoginRequest, raw_req: Request, db: Session = Depends(get_db)
 
     # Successful login: reset rate limit attempts for this client IP
     FAILED_LOGIN_ATTEMPTS.pop(client_ip, None)
+    security_log.info("login_ok user=%s ip=%s", user.username, client_ip)
 
     token = create_access_token({"sub": str(user.id), "role": user.role, "username": user.username})
 

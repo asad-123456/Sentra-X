@@ -9,12 +9,13 @@ from jose import jwt
 from sqlalchemy import desc, func
 from sqlalchemy.orm import Session
 
-from ..auth import security
+from ..auth import require_roles, security
 from ..config import settings
 from ..database import get_db
 from ..models.asset import Asset
 from ..models.exemplar import FeedbackExemplar
 from ..models.user import User
+from ..security_log import security_log
 
 router = APIRouter(prefix="/governance", tags=["Governance & Feedback Calibration"])
 
@@ -149,7 +150,10 @@ def toggle_exemplar_active(
 
 
 @router.get("/assets", response_model=List[Dict[str, Any]])
-def get_assets(db: Session = Depends(get_db)):
+def get_assets(
+    _: Optional[User] = Depends(require_roles("Analyst", "TeamLead", "Admin", demo_open=True)),
+    db: Session = Depends(get_db),
+):
     assets = db.query(Asset).order_by(Asset.agent_id).all()
     results = []
     for asset in assets:
@@ -172,35 +176,18 @@ def get_assets(db: Session = Depends(get_db)):
 def update_asset_criticality(
     agent_id: str,
     payload: Dict[str, Any],
-    auth: Optional[HTTPAuthorizationCredentials] = Depends(security),
+    caller: Optional[User] = Depends(
+        require_roles(
+            "TeamLead",
+            "Admin",
+            demo_open=True,
+            forbidden_detail="HTTP 403 Forbidden: Analyst role is prohibited from modifying asset criticality tiers (AC-17, FR-9).",
+        )
+    ),
     db: Session = Depends(get_db),
 ):
-    caller = get_caller_user(auth, db)
-    if not caller and not settings.DEMO_MODE:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="HTTP 401 Unauthorized: Authentication credentials required.",
-        )
-    if caller and caller.role == "Analyst":
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="HTTP 403 Forbidden: Analyst role is prohibited from modifying asset criticality tiers (AC-17, FR-9).",
-        )
-
-    updated_by_raw = payload.get("updated_by")
-    if updated_by_raw:
-        try:
-            user_obj = db.query(User).filter(User.id == uuid.UUID(str(updated_by_raw))).first()
-            if user_obj and user_obj.role == "Analyst":
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail="HTTP 403 Forbidden: Analyst role is prohibited from modifying asset criticality tiers (AC-17, FR-9).",
-                )
-        except HTTPException:
-            raise
-        except Exception:
-            pass
-
+    # Role and is_active are checked against the database by require_roles. Any "updated_by" in the request body is
+    # ignored on purpose: the editor recorded is always the authenticated caller (no identity spoofing).
     asset = db.query(Asset).filter(Asset.agent_id == agent_id).first()
     if not asset:
         raise HTTPException(status_code=404, detail=f"Asset {agent_id} not found.")
@@ -212,16 +199,15 @@ def update_asset_criticality(
             detail=f"HTTP 422: Invalid criticality_tier '{tier}'. Must be one of: 'LOW', 'MEDIUM', 'HIGH', 'CRITICAL'.",
         )
 
+    old_tier = asset.criticality_tier
     asset.criticality_tier = tier
     asset.updated_at = datetime.now(timezone.utc)
-    if updated_by_raw:
-        try:
-            asset.updated_by = uuid.UUID(str(updated_by_raw))
-        except Exception:
-            pass
-    elif caller:
+    if caller is not None:
         asset.updated_by = caller.id
     db.commit()
+    security_log.info(
+        "asset_updated by=%s agent=%s tier=%s->%s", caller.username if caller else "demo", agent_id, old_tier, tier
+    )
 
     return {
         "id": f"asset-{asset.agent_id}",
@@ -239,20 +225,15 @@ def update_asset_criticality(
 @router.post("/assets", response_model=Dict[str, Any])
 def register_asset(
     payload: Dict[str, Any],
-    auth: Optional[HTTPAuthorizationCredentials] = Depends(security),
+    caller: Optional[User] = Depends(
+        require_roles(
+            "Admin",
+            demo_open=True,
+            forbidden_detail="HTTP 403 Forbidden: Only Admin can register enterprise assets (UC-10, UC-11).",
+        )
+    ),
     db: Session = Depends(get_db),
 ):
-    caller = get_caller_user(auth, db)
-    if not caller and not settings.DEMO_MODE:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="HTTP 401 Unauthorized: Authentication credentials required.",
-        )
-    if caller and caller.role != "Admin":
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="HTTP 403 Forbidden: Only Admin can register enterprise assets (UC-10, UC-11).",
-        )
     agent_id = str(payload.get("agent_id", "")).strip()
     hostname = str(payload.get("hostname", "")).strip()
     ip_raw = payload.get("ip_address")

@@ -1,8 +1,5 @@
 """AC-17 / FR-9 against the real asset routes in app/routers/governance.py, run on sentrax_test.
-DEMO_MODE is forced off, so the role rules are the real ones.
-
-Tests marked xfail document gaps in the existing routes (proposed to Asad). When a gap is fixed its
-test starts to pass; then delete the xfail marker."""
+DEMO_MODE is forced off, so the role rules are the real ones."""
 import uuid
 from datetime import datetime, timezone
 
@@ -140,14 +137,15 @@ def test_unknown_agent_is_404(client, factory):
     assert r.status_code == 404
 
 
-# ---- known gaps in the existing routes (proposed to Asad) ----
-@pytest.mark.xfail(reason="GET /governance/assets has no authentication at all", strict=False)
-def test_gap_listing_requires_login(client):
+# ---- hardening agreed with Asad ----
+def test_listing_requires_login_but_any_role_may_read(client, factory):
     assert client.get(URL).status_code == 401
+    make_user(factory, "ann", "Analyst")
+    r = client.get(URL, headers=headers(client, "ann"))
+    assert r.status_code == 200 and [a["agent_id"] for a in r.json()] == ["001", "002"]
 
 
-@pytest.mark.xfail(reason="updated_by is taken from the request body, so an editor can name someone else", strict=False)
-def test_gap_updated_by_cannot_be_spoofed(client, factory):
+def test_updated_by_cannot_be_spoofed(client, factory):
     lead = make_user(factory, "lead", "TeamLead")
     boss = make_user(factory, "boss", "Admin")
     client.patch(f"{URL}/001", headers=headers(client, "lead"),
@@ -155,8 +153,7 @@ def test_gap_updated_by_cannot_be_spoofed(client, factory):
     assert row(factory).updated_by == lead.id
 
 
-@pytest.mark.xfail(reason="a deactivated user's token still works on this route", strict=False)
-def test_gap_deactivated_user_cannot_update(client, factory):
+def test_deactivated_user_cannot_update(client, factory):
     make_user(factory, "lead", "TeamLead")
     h = headers(client, "lead")
     with factory.begin() as s:
