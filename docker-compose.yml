@@ -6,7 +6,7 @@ services:
       POSTGRES_USER: sentrax
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-sentrax}
     ports:
-      - "5432:5432"
+      - "5432:5432"          # so pytest on your laptop can reach it
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -14,6 +14,47 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
+    restart: unless-stopped
+
+  backend:
+    build: ./backend
+    env_file:
+      - path: ./backend/.env       # optional: your local settings (never committed)
+        required: false
+    environment:
+      # these override the localhost URLs in backend/.env: inside compose the database host is "db"
+      DATABASE_URL: postgresql+psycopg://sentrax:${POSTGRES_PASSWORD:-sentrax}@db:5432/sentrax
+      DATABASE_URL_ASYNC: postgresql+psycopg_async://sentrax:${POSTGRES_PASSWORD:-sentrax}@db:5432/sentrax
+      SEED_DEMO_DATA: ${SEED_DEMO_DATA:-true}
+      LLM_PROVIDER: ${LLM_PROVIDER:-mock}
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "8000:8000"          # Swagger (/docs) and the Wazuh webhook; lab use only
+    healthcheck:
+      test: ["CMD", "python", "-c", "import json,sys,urllib.request; sys.exit(0 if json.load(urllib.request.urlopen('http://localhost:8000/api/health', timeout=3)).get('status') == 'HEALTHY' else 1)"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 30s
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: .
+      dockerfile: deploy/nginx/Dockerfile
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "8443:443"
+    healthcheck:
+      test: ["CMD", "curl", "-fsk", "https://localhost/api/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
     restart: unless-stopped
 
 volumes:
