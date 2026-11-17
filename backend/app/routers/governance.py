@@ -51,7 +51,10 @@ def get_caller_user(
 
 
 @router.get("/exemplars", response_model=List[Dict[str, Any]])
-def get_exemplars(db: Session = Depends(get_db)):
+def get_exemplars(
+    _: Optional[User] = Depends(require_roles("TeamLead", "Admin", demo_open=True)),
+    db: Session = Depends(get_db),
+):
     exemplars = db.query(FeedbackExemplar).order_by(desc(FeedbackExemplar.created_at)).all()
     results = []
     for ex in exemplars:
@@ -64,7 +67,7 @@ def get_exemplars(db: Session = Depends(get_db)):
                 "calibrated_verdict": ex.calibrated_verdict,
                 "calibrated_severity": ex.calibrated_severity,
                 "rationale": ex.rationale,
-                "match_tier_support": "Tier 1" if "procdump" in ex.process_signature or "powershell" in ex.process_signature else "Tier 2",
+                "match_tier_support": "Tier 1" if ex.process_signature and ("procdump" in ex.process_signature or "powershell" in ex.process_signature) else "Tier 2",
                 "match_hit_count": ex.match_hit_count,
                 "is_active": ex.is_active,
                 "created_by": _resolve_username(ex.created_by, db),
@@ -78,21 +81,17 @@ def get_exemplars(db: Session = Depends(get_db)):
 def toggle_exemplar_active(
     exemplar_id: str,
     payload: Dict[str, Any],
-    auth: Optional[HTTPAuthorizationCredentials] = Depends(security),
+    caller: Optional[User] = Depends(
+        require_roles(
+            "TeamLead",
+            demo_open=True,
+            forbidden_detail="HTTP 403 Forbidden: Only a Team Lead may revoke exemplars (FR-4, UC-10).",
+        )
+    ),
     db: Session = Depends(get_db),
 ):
-    caller = get_caller_user(auth, db)
-    if not caller and not settings.DEMO_MODE:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="HTTP 401 Unauthorized: Authentication credentials required.",
-        )
-    if caller and caller.role == "Analyst":
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="HTTP 403 Forbidden: Analyst role is prohibited from revoking exemplars (FR-4, UC-10).",
-        )
-
+    # require_roles checks the role and is_active in the database on every request. A "revoked_by" in the body is
+    # ignored on purpose: the revoker recorded is always the authenticated caller.
     try:
         ex_id_int = int(exemplar_id.replace("EX-", "").replace("ex-", ""))
     except ValueError:
@@ -107,29 +106,19 @@ def toggle_exemplar_active(
     else:
         new_active = not exemplar.is_active
 
+    was_active = exemplar.is_active
     exemplar.is_active = new_active
     if not new_active:
-        exemplar.revoked_at = datetime.now(timezone.utc)
-        revoked_by_raw = payload.get("revoked_by")
-        if revoked_by_raw:
-            try:
-                rev_user = db.query(User).filter(User.id == uuid.UUID(str(revoked_by_raw))).first()
-                if rev_user and rev_user.role == "Analyst":
-                    raise HTTPException(
-                        status_code=status.HTTP_403_FORBIDDEN,
-                        detail="HTTP 403 Forbidden: Analyst role is prohibited from revoking exemplars (FR-4, UC-10).",
-                    )
-                exemplar.revoked_by = uuid.UUID(str(revoked_by_raw))
-            except HTTPException:
-                raise
-            except Exception:
-                pass
-        elif caller:
-            exemplar.revoked_by = caller.id
+        if was_active:   # revoking an already revoked exemplar keeps the original who/when
+            exemplar.revoked_at = datetime.now(timezone.utc)
+            exemplar.revoked_by = caller.id if caller else None
     else:
         exemplar.revoked_at = None
+        exemplar.revoked_by = None
 
     db.commit()
+    security_log.info("exemplar_%s by=%s exemplar=%s", "reactivated" if new_active else "revoked",
+                      caller.username if caller else "demo", exemplar.id)
 
     return {
         "id": str(exemplar.id),
