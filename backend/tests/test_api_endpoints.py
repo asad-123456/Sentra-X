@@ -75,7 +75,23 @@ def run_all_api_tests():
     assert len(detail["ai_assessment"]["cited_evidence_keys"]) > 0
     print(f"✅ PASS: [GET /api/v1/alerts/{test_alert_id}] Evidence Pack & Assessment retrieved")
 
-    # 7. Decision Submission: OVERRIDE with short rationale (MUST FAIL with HTTP 422)
+    # 7. Reset test alerts to AWAITING_ANALYST for test repeatability (idempotent runs)
+    try:
+        from app.database import SyncSessionLocal
+        from app.models.alert import Alert
+        from app.utils import parse_uuid
+        with SyncSessionLocal() as db_session:
+            for aid in ("al-9021", "al-9020", "al-9019"):
+                target_uuid = parse_uuid(aid)
+                target_a = db_session.query(Alert).filter(Alert.id == target_uuid).first()
+                if target_a:
+                    target_a.status = "AWAITING_ANALYST"
+                    target_a.retry_count = 0
+            db_session.commit()
+    except Exception:
+        pass
+
+    # 7b. Decision Submission: OVERRIDE with short rationale (MUST FAIL with HTTP 422)
     short_override = client.post(
         f"/api/v1/alerts/{test_alert_id}/decision",
         json={

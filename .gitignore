@@ -4,6 +4,12 @@
 gemini-docs/
 gemini-docs
 
+# AI Agent Configuration & Skills
+.agents/
+.claude/
+agent/
+skills-lock.json
+
 # Dependencies
 node_modules/
 frontend/node_modules/

@@ -95,7 +95,6 @@ Threat actors frequently attempt to manipulate LLM triage by embedding system ov
 SentraX/
 ├── .gitignore                   # Ignores .venv, node_modules, build dist, credentials, and scratch logs
 ├── README.md                    # Root technical architecture, quickstart, and benchmark guide
-├── docker-compose.yml           # Multi-container orchestration (PostgreSQL 16, FastAPI backend, Vite frontend)
 ├── backend/                     # FastAPI Application & PostgreSQL Persistence Layer
 │   ├── alembic/                 # Database migrations (0001 initial, 0002 srs parity, 0003 constraints, 0004 config, 0005 hardening)
 │   ├── alembic.ini              # Alembic environment and configuration
@@ -157,14 +156,15 @@ SentraX/
 
 ### Step 1: Database Provisioning (PostgreSQL 16)
 
-Ensure a local PostgreSQL instance is running with an empty database named `sentrax_db`:
+Ensure a local PostgreSQL instance is running with an empty database named `sentrax`:
 
 ```bash
 # Using native PostgreSQL:
-psql -U postgres -c "CREATE DATABASE sentrax_db;"
+psql -U postgres -c "CREATE USER sentrax WITH PASSWORD 'sentrax';"
+psql -U postgres -c "CREATE DATABASE sentrax OWNER sentrax;"
 
 # Or using Docker:
-docker run --name sentrax-postgres -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=sentrax_db -p 5432:5432 -d postgres:16
+docker run --name sentrax-postgres -e POSTGRES_USER=sentrax -e POSTGRES_PASSWORD=sentrax -e POSTGRES_DB=sentrax -p 5432:5432 -d postgres:16
 ```
 
 ---
@@ -191,11 +191,11 @@ docker run --name sentrax-postgres -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=
    ```bash
    cp .env.example .env
    ```
-   *Verify that `DATABASE_URL` in `.env` matches your PostgreSQL connection string:*
+   *Verify that `DATABASE_URL` and `DATABASE_URL_ASYNC` in `.env` match your PostgreSQL connection string:*
    ```env
-   DATABASE_URL=postgresql+psycopg://postgres:postgres@localhost:5432/sentrax_db
-   ASYNC_DATABASE_URL=postgresql+psycopg_async://postgres:postgres@localhost:5432/sentrax_db
-   JWT_SECRET_KEY=sentrax-super-secret-jwt-key-2026
+   DATABASE_URL=postgresql+psycopg://sentrax:sentrax@localhost:5432/sentrax
+   DATABASE_URL_ASYNC=postgresql+psycopg_async://sentrax:sentrax@localhost:5432/sentrax
+   SECRET_KEY=sentrax-secret-key-2026-cs24082-super-secure
    ```
 
 4. **Apply Alembic migrations to build the complete relational schema:**
