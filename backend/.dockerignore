@@ -1,0 +1,9 @@
+.venv
+__pycache__
+*.pyc
+.pytest_cache
+# never bake secrets into the image
+.env
+.env.*
+!.env.example
+tests/fixtures/replay/stream_*.jsonl

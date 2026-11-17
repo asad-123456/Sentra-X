@@ -1,0 +1,158 @@
+{
+  "timestamp": "2026-11-16T10:32:28.339+0000",
+  "rule": {
+    "level": 7,
+    "description": "Integrity checksum changed.",
+    "id": "550",
+    "mitre": {
+      "id": [
+        "T1565.001"
+      ],
+      "tactic": [
+        "Impact"
+      ],
+      "technique": [
+        "Stored Data Manipulation"
+      ]
+    },
+    "firedtimes": 1,
+    "mail": false,
+    "groups": [
+      "ossec",
+      "syscheck",
+      "syscheck_entry_modified",
+      "syscheck_file"
+    ],
+    "pci_dss": [
+      "11.5"
+    ],
+    "gpg13": [
+      "4.11"
+    ],
+    "gdpr": [
+      "II_5.1.f"
+    ],
+    "hipaa": [
+      "164.312.c.1",
+      "164.312.c.2"
+    ],
+    "nist_800_53": [
+      "SI.7"
+    ],
+    "tsc": [
+      "PI1.4",
+      "PI1.5",
+      "CC6.1",
+      "CC6.8",
+      "CC7.2",
+      "CC7.3"
+    ]
+  },
+  "agent": {
+    "id": "006",
+    "name": "Windows-PC",
+    "ip": "172.16.16.199"
+  },
+  "manager": {
+    "name": "wazuh-server"
+  },
+  "id": "1794825148.74064",
+  "full_log": "File 'c:\\fimtest\\test1.txt' modified\nMode: realtime\nChanged attributes: size,mtime,md5,sha1,sha256\nSize changed from '0' to '10'\nOld modification time was: '1794825105', now it is '1794825148'\nOld md5sum was: 'd41d8cd98f00b204e9800998ecf8427e'\nNew md5sum is : 'e79bd3af1c144dd6c552f413ce7b7cc4'\nOld sha1sum was: 'da39a3ee5e6b4b0d3255bfef95601890afd80709'\nNew sha1sum is : '5d407f5cf6cdaaee7570e7d109cac191f8cbe7b6'\nOld sha256sum was: 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855'\nNew sha256sum is : 'df779faa3fb14e7c03ccb2f894af31fe39bc43246f44f2a93670e32570d6620b'\n",
+  "syscheck": {
+    "path": "c:\\fimtest\\test1.txt",
+    "mode": "realtime",
+    "size_before": "0",
+    "size_after": "10",
+    "win_perm_after": [
+      {
+        "name": "Administrators",
+        "allowed": [
+          "DELETE",
+          "READ_CONTROL",
+          "WRITE_DAC",
+          "WRITE_OWNER",
+          "SYNCHRONIZE",
+          "READ_DATA",
+          "WRITE_DATA",
+          "APPEND_DATA",
+          "READ_EA",
+          "WRITE_EA",
+          "EXECUTE",
+          "READ_ATTRIBUTES",
+          "WRITE_ATTRIBUTES"
+        ]
+      },
+      {
+        "name": "SYSTEM",
+        "allowed": [
+          "DELETE",
+          "READ_CONTROL",
+          "WRITE_DAC",
+          "WRITE_OWNER",
+          "SYNCHRONIZE",
+          "READ_DATA",
+          "WRITE_DATA",
+          "APPEND_DATA",
+          "READ_EA",
+          "WRITE_EA",
+          "EXECUTE",
+          "READ_ATTRIBUTES",
+          "WRITE_ATTRIBUTES"
+        ]
+      },
+      {
+        "name": "Users",
+        "allowed": [
+          "READ_CONTROL",
+          "SYNCHRONIZE",
+          "READ_DATA",
+          "READ_EA",
+          "EXECUTE",
+          "READ_ATTRIBUTES"
+        ]
+      },
+      {
+        "name": "Authenticated Users",
+        "allowed": [
+          "DELETE",
+          "READ_CONTROL",
+          "SYNCHRONIZE",
+          "READ_DATA",
+          "WRITE_DATA",
+          "APPEND_DATA",
+          "READ_EA",
+          "WRITE_EA",
+          "EXECUTE",
+          "READ_ATTRIBUTES",
+          "WRITE_ATTRIBUTES"
+        ]
+      }
+    ],
+    "uid_after": "S-1-5-32-544",
+    "md5_before": "d41d8cd98f00b204e9800998ecf8427e",
+    "md5_after": "e79bd3af1c144dd6c552f413ce7b7cc4",
+    "sha1_before": "da39a3ee5e6b4b0d3255bfef95601890afd80709",
+    "sha1_after": "5d407f5cf6cdaaee7570e7d109cac191f8cbe7b6",
+    "sha256_before": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "sha256_after": "df779faa3fb14e7c03ccb2f894af31fe39bc43246f44f2a93670e32570d6620b",
+    "attrs_after": [
+      "ARCHIVE"
+    ],
+    "uname_after": "Administrators",
+    "mtime_before": "2026-11-16T10:31:45",
+    "mtime_after": "2026-11-16T10:32:28",
+    "diff": "---\n> edit one\n",
+    "changed_attributes": [
+      "size",
+      "mtime",
+      "md5",
+      "sha1",
+      "sha256"
+    ],
+    "event": "modified"
+  },
+  "decoder": {
+    "name": "syscheck_integrity_changed"
+  },
+  "location": "syscheck"
+}

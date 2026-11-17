@@ -25,7 +25,12 @@ class Settings(BaseSettings):
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 480
     LLM_PROVIDER: str = "gemini"
-    DEMO_MODE: bool = True
+    # Production-safe default. Set DEMO_MODE=true in backend/.env only for local demos: it allows token-less access
+    # to the demo-open routes and the legacy demo passwords.
+    DEMO_MODE: bool = False
+    # Password given to a user created without one (the admin UI has no password field). Empty = a random
+    # temporary password is generated and returned once in the create-user response.
+    DEFAULT_NEW_USER_PASSWORD: str = ""
     ALLOWED_ORIGINS: str = (
         "http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000,http://localhost:4173"
     )

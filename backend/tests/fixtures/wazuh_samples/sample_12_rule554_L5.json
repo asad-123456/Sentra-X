@@ -1,0 +1,134 @@
+{
+  "timestamp": "2026-11-16T10:31:44.927+0000",
+  "rule": {
+    "level": 5,
+    "description": "File added to the system.",
+    "id": "554",
+    "firedtimes": 1,
+    "mail": false,
+    "groups": [
+      "ossec",
+      "syscheck",
+      "syscheck_entry_added",
+      "syscheck_file"
+    ],
+    "pci_dss": [
+      "11.5"
+    ],
+    "gpg13": [
+      "4.11"
+    ],
+    "gdpr": [
+      "II_5.1.f"
+    ],
+    "hipaa": [
+      "164.312.c.1",
+      "164.312.c.2"
+    ],
+    "nist_800_53": [
+      "SI.7"
+    ],
+    "tsc": [
+      "PI1.4",
+      "PI1.5",
+      "CC6.1",
+      "CC6.8",
+      "CC7.2",
+      "CC7.3"
+    ]
+  },
+  "agent": {
+    "id": "006",
+    "name": "Windows-PC",
+    "ip": "172.16.16.199"
+  },
+  "manager": {
+    "name": "wazuh-server"
+  },
+  "id": "1794825104.72789",
+  "full_log": "File 'c:\\fimtest\\test1.txt' added\nMode: realtime\n",
+  "syscheck": {
+    "path": "c:\\fimtest\\test1.txt",
+    "mode": "realtime",
+    "size_after": "0",
+    "win_perm_after": [
+      {
+        "name": "Administrators",
+        "allowed": [
+          "DELETE",
+          "READ_CONTROL",
+          "WRITE_DAC",
+          "WRITE_OWNER",
+          "SYNCHRONIZE",
+          "READ_DATA",
+          "WRITE_DATA",
+          "APPEND_DATA",
+          "READ_EA",
+          "WRITE_EA",
+          "EXECUTE",
+          "READ_ATTRIBUTES",
+          "WRITE_ATTRIBUTES"
+        ]
+      },
+      {
+        "name": "SYSTEM",
+        "allowed": [
+          "DELETE",
+          "READ_CONTROL",
+          "WRITE_DAC",
+          "WRITE_OWNER",
+          "SYNCHRONIZE",
+          "READ_DATA",
+          "WRITE_DATA",
+          "APPEND_DATA",
+          "READ_EA",
+          "WRITE_EA",
+          "EXECUTE",
+          "READ_ATTRIBUTES",
+          "WRITE_ATTRIBUTES"
+        ]
+      },
+      {
+        "name": "Users",
+        "allowed": [
+          "READ_CONTROL",
+          "SYNCHRONIZE",
+          "READ_DATA",
+          "READ_EA",
+          "EXECUTE",
+          "READ_ATTRIBUTES"
+        ]
+      },
+      {
+        "name": "Authenticated Users",
+        "allowed": [
+          "DELETE",
+          "READ_CONTROL",
+          "SYNCHRONIZE",
+          "READ_DATA",
+          "WRITE_DATA",
+          "APPEND_DATA",
+          "READ_EA",
+          "WRITE_EA",
+          "EXECUTE",
+          "READ_ATTRIBUTES",
+          "WRITE_ATTRIBUTES"
+        ]
+      }
+    ],
+    "uid_after": "S-1-5-32-544",
+    "md5_after": "d41d8cd98f00b204e9800998ecf8427e",
+    "sha1_after": "da39a3ee5e6b4b0d3255bfef95601890afd80709",
+    "sha256_after": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "attrs_after": [
+      "ARCHIVE"
+    ],
+    "uname_after": "Administrators",
+    "mtime_after": "2026-11-16T10:31:45",
+    "event": "added"
+  },
+  "decoder": {
+    "name": "syscheck_new_entry"
+  },
+  "location": "syscheck"
+}

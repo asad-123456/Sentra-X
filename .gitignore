@@ -78,4 +78,5 @@ desktop.ini
 *.ntvs*
 *.njsproj
 *.sln
-
+alerts_raw.jsonl
+fim_alerts.jsonl
