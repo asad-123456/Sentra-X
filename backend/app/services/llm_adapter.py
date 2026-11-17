@@ -19,6 +19,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Any, Callable, Literal, Sequence, get_args
 from uuid import UUID
+import threading
 
 from dotenv import load_dotenv
 from pydantic import ValidationError
@@ -397,8 +398,29 @@ def _int_env(name: str) -> int | None:
     return int(value) if value else None
 
 
-def get_adapter(provider: str | None = None) -> LLMAdapter:
-    """Build the adapter named by LLM_PROVIDER (mock | gemini | claude)."""
+_ADAPTER_CACHE: dict[tuple, LLMAdapter] = {}
+_ADAPTER_LOCK = threading.Lock()
+
+
+def clear_adapter_cache() -> None:
+    with _ADAPTER_LOCK:
+        _ADAPTER_CACHE.clear()
+
+
+def _cached(cache_key: tuple, build: Callable[[], LLMAdapter]) -> LLMAdapter:
+    with _ADAPTER_LOCK:
+        adapter = _ADAPTER_CACHE.get(cache_key)
+        if adapter is None:
+            adapter = build()
+            _ADAPTER_CACHE[cache_key] = adapter
+        return adapter
+
+
+def get_adapter(provider: str | None = None, model: str | None = None) -> LLMAdapter:
+    """Build the adapter named by LLM_PROVIDER (mock | gemini | claude).
+
+    Real adapters are cached per (provider, key, model). The mock is cheap and
+    stateful, so every call returns a fresh one."""
     load_dotenv(override=False)
     name = (provider or os.getenv("LLM_PROVIDER") or "mock").strip().lower()
 
@@ -412,12 +434,14 @@ def get_adapter(provider: str | None = None) -> LLMAdapter:
         key = os.getenv("GEMINI_API_KEY", "").strip()
         if not key:
             raise ValueError("GEMINI_API_KEY is not set")
-        return GeminiAdapter(key, os.getenv("GEMINI_MODEL") or DEFAULT_GEMINI_MODEL)
+        model = model or os.getenv("GEMINI_MODEL") or DEFAULT_GEMINI_MODEL
+        return _cached(("gemini", key, model), lambda: GeminiAdapter(key, model))
     if name in ("claude", "anthropic"):
         key = os.getenv("ANTHROPIC_API_KEY", "").strip()
         if not key:
             raise ValueError("ANTHROPIC_API_KEY is not set")
-        return ClaudeAdapter(key, os.getenv("ANTHROPIC_MODEL") or DEFAULT_CLAUDE_MODEL)
+        model = model or os.getenv("ANTHROPIC_MODEL") or DEFAULT_CLAUDE_MODEL
+        return _cached(("claude", key, model), lambda: ClaudeAdapter(key, model))
     raise ValueError(f"Unknown LLM_PROVIDER: {name!r} (use mock, gemini or claude)")
 
 

@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any, Sequence
 from uuid import UUID
+import ipaddress
 
 from app.services.prompt_sanitizer import sanitize_value
 
@@ -139,6 +140,18 @@ def _neutralize_keys(value: Any) -> Any:
 
 
 # --- correlation ------------------------------------------------------------
+def is_correlatable_ip(ip: str | None) -> bool:
+    """False for empty, loopback and unspecified addresses: unrelated hosts share them."""
+    if not ip:
+        return False
+    try:
+        addr = ipaddress.ip_address(ip.strip())
+    except ValueError:
+        return True  # unparseable text keeps the old exact-match behaviour
+    if isinstance(addr, ipaddress.IPv6Address) and addr.ipv4_mapped is not None:
+        addr = addr.ipv4_mapped
+    return not (addr.is_loopback or addr.is_unspecified)
+
 def select_correlated(
     alert: AlertRecord,
     candidates: Sequence[CorrelatedAlert],
@@ -157,7 +170,11 @@ def select_correlated(
         if not (earliest <= ts <= ref):
             continue
         same_agent = c.agent_id is not None and c.agent_id == alert.agent_id
-        same_ip = c.src_ip is not None and c.src_ip == alert.src_ip
+        same_ip = (
+            c.src_ip is not None
+            and is_correlatable_ip(alert.src_ip)
+            and c.src_ip == alert.src_ip
+        )
         if same_agent or same_ip:
             matches.append((ts, c))
     matches.sort(key=lambda pair: pair[0], reverse=True)
