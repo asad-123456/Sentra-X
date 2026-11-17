@@ -78,6 +78,9 @@ class Poller:
         self._stop.set()
         if self._thread:
             self._thread.join(timeout=5)
+        # Close the httpx client after the thread exits so no in-flight request is interrupted
+        if hasattr(self.source, "close"):
+            self.source.close()
 
     @property
     def alive(self) -> bool:

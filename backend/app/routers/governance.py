@@ -4,13 +4,10 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status
-from fastapi.security import HTTPAuthorizationCredentials
-from jose import jwt
 from sqlalchemy import desc, func
 from sqlalchemy.orm import Session
 
 from ..auth import require_roles, security
-from ..config import settings
 from ..database import get_db
 from ..models.asset import Asset
 from ..models.exemplar import FeedbackExemplar
@@ -33,22 +30,6 @@ def _resolve_username(created_by_uuid, db: Session) -> str:
     return str(created_by_uuid)
 
 
-def get_caller_user(
-    auth: Optional[HTTPAuthorizationCredentials] = Depends(security),
-    db: Session = Depends(get_db),
-) -> Optional[User]:
-    if auth and auth.credentials:
-        try:
-            token_payload = jwt.decode(
-                auth.credentials, settings.SECRET_KEY, algorithms=[settings.ALGORITHM]
-            )
-            sub = token_payload.get("sub")
-            if sub:
-                return db.query(User).filter(User.id == uuid.UUID(sub)).first()
-        except Exception:
-            pass
-    return None
-
 
 @router.get("/exemplars", response_model=List[Dict[str, Any]])
 def get_exemplars(
@@ -67,7 +48,7 @@ def get_exemplars(
                 "calibrated_verdict": ex.calibrated_verdict,
                 "calibrated_severity": ex.calibrated_severity,
                 "rationale": ex.rationale,
-                "match_tier_support": "Tier 1" if ex.process_signature and ("procdump" in ex.process_signature or "powershell" in ex.process_signature) else "Tier 2",
+                "match_tier_support": "Tier 1" if ex.process_signature else "Tier 2",
                 "match_hit_count": ex.match_hit_count,
                 "is_active": ex.is_active,
                 "created_by": _resolve_username(ex.created_by, db),

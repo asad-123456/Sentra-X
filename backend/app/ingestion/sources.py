@@ -42,7 +42,11 @@ class IndexerSource:
                  verify_tls: bool = False, page_size: int = 1000):
         self.base_url = base_url.rstrip("/")
         self.page_size = page_size
-        self._client = httpx.Client(auth=(user, password), verify=verify_tls, timeout=15.0)
+        self._client = httpx.Client(auth=(user, password), verify=verify_tls, timeout=15.0) 
+
+    def close(self) -> None:
+        """Release the underlying connection pool. Called by Poller.stop()."""
+        self._client.close()
 
     def fetch(self, cursor: Optional[datetime]) -> list[dict]:
         since = cursor or (datetime.now(timezone.utc) - timedelta(minutes=10))

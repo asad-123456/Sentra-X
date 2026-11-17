@@ -12,7 +12,10 @@ ENV VITE_API_BASE_URL=$VITE_API_BASE_URL
 RUN npx vite build
 
 FROM nginx:1.27-alpine
-# Self-signed certificate, generated at image build (lab/demo use only)
+# Self-signed certificate generated at image build time.
+# LAB/DEMO USE ONLY — a new cert is generated on every image rebuild, breaking
+# browser trust after rebuilds. For production, remove this RUN block and mount
+# a real cert via a Docker volume or secret into /etc/nginx/certs/.
 RUN apk add --no-cache openssl curl \
  && mkdir -p /etc/nginx/certs \
  && openssl req -x509 -nodes -newkey rsa:2048 -days 365 \

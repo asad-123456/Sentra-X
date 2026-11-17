@@ -32,3 +32,16 @@ class WazuhSettings(BaseSettings):
 @lru_cache
 def get_wazuh_settings() -> WazuhSettings:
     return WazuhSettings()
+
+
+import logging as _logging
+
+def _warn_if_misconfigured() -> None:
+    w = get_wazuh_settings()
+    if w.WAZUH_INGEST_MODE == "webhook" and not w.WAZUH_WEBHOOK_SECRET:
+        _logging.getLogger("sentrax.ingestion").warning(
+            "WAZUH_INGEST_MODE=webhook but WAZUH_WEBHOOK_SECRET is empty — "
+            "every webhook request will be rejected with 401. Set the secret in backend/.env."
+        )
+
+_warn_if_misconfigured()

@@ -71,7 +71,11 @@ app.include_router(analytics.router, prefix="/api/v1")
 app.include_router(governance.router, prefix="/api/v1")
 app.include_router(evaluation.router, prefix="/api/v1")
 app.include_router(admin.router, prefix="/api/v1")
-app.include_router(webhook_router)  # Wazuh webhook (Part 4): POST /api/webhooks/wazuh
+# NOTE: The Wazuh webhook is intentionally mounted at /api/webhooks/wazuh (no /v1 prefix).
+# This matches the path documented in docs/wazuh_alert_source.md and configured in
+# the Wazuh server's integration block. Do NOT move it under /api/v1 without updating
+# both the Wazuh integration config and nginx.conf.
+app.include_router(webhook_router)  # POST /api/webhooks/wazuh
 
 
 @app.get("/")
