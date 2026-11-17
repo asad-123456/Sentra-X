@@ -17,6 +17,7 @@ from ..models.asset import Asset
 from ..models.ai_assessment import AIAssessment
 from ..models.evidence_pack import EvidencePack
 from ..models.audit import AnalystDecisionAudit
+from ..exemplars.service import find_exemplars
 from ..models.exemplar import FeedbackExemplar
 from ..models.user import User
 from ..schemas.queue import PaginatedQueueResponse
@@ -242,39 +243,38 @@ def get_alert_detail(alert_id: str, db: Session = Depends(get_db)):
             }
         )
 
-    # Fetch relevant few-shot calibration exemplars matching rule_id
-    exemplars = (
-        db.query(FeedbackExemplar)
-        .filter(FeedbackExemplar.rule_id == alert.rule_id, FeedbackExemplar.is_active.is_(True))
-        .order_by(desc(FeedbackExemplar.created_at))
-        .limit(2)
-        .all()
+    # Exemplars for this alert: Tier 1 (same rule + process signature) then Tier 2 (same rule + asset tier), max 2.
+    # Read-only here: match_hit_count only increases when the triage worker injects an exemplar into a prompt.
+    found = find_exemplars(
+        db,
+        alert_id=alert.id,
+        rule_id=alert.rule_id,
+        process_signature=alert.process_signature,
+        asset_criticality=asset.criticality_tier if asset else "MEDIUM",
+        count_hits=False,
     )
-
+    by_id = {
+        ex.id: ex
+        for ex in db.query(FeedbackExemplar).filter(FeedbackExemplar.id.in_([f["id"] for f in found])).all()
+    } if found else {}
     exemplar_items = []
-    exemplars_updated = False
-    for ex in exemplars:
-        ex.match_hit_count = (ex.match_hit_count or 0) + 1
-        exemplars_updated = True
+    for f in found:
+        ex = by_id.get(f["id"])
         exemplar_items.append(
             {
-                "id": ex.id,
-                "rule_id": ex.rule_id,
-                "process_signature": ex.process_signature,
-                "asset_criticality": ex.asset_criticality,
-                "calibrated_verdict": ex.calibrated_verdict,
-                "calibrated_severity": ex.calibrated_severity,
-                "rationale": ex.rationale,
-                "is_active": ex.is_active,
-                "match_hit_count": ex.match_hit_count,
-                "created_at": str(ex.created_at),
+                "id": f["id"],
+                "match_tier": f["match_tier"],
+                "rule_id": f["rule_id"],
+                "process_signature": f["process_signature"],
+                "asset_criticality": f["asset_criticality"],
+                "calibrated_verdict": f["calibrated_verdict"],
+                "calibrated_severity": f["calibrated_severity"],
+                "rationale": f["rationale"],
+                "is_active": ex.is_active if ex else True,
+                "match_hit_count": ex.match_hit_count if ex else 0,
+                "created_at": str(ex.created_at) if ex else None,
             }
         )
-    if exemplars_updated:
-        try:
-            db.commit()
-        except Exception:
-            db.rollback()
 
     # Prepare EvidencePack payload
     ep_data = None

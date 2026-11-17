@@ -9,6 +9,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from .config import settings
 from .database import sync_engine
+import functools
 from contextlib import asynccontextmanager
 
 from .ingestion.db_access import get_session_factory
@@ -17,13 +18,28 @@ from .ingestion.sources import IndexerSource
 from .ingestion.wazuh_settings import get_wazuh_settings
 from .ingestion.webhook import router as webhook_router
 from .routers import admin, alerts, analytics, auth, evaluation, governance
+from .worker.bridge import build_adapter
+from .worker.dispatcher import Dispatcher
+from .worker.processor import process_alert
+from .worker.worker_settings import get_worker_settings
 
 logger = logging.getLogger("sentrax.api")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Start the Wazuh poller only when WAZUH_INGEST_MODE=poll (Part 4)."""
+    """Start the triage worker (Part 9) and, when WAZUH_INGEST_MODE=poll, the Wazuh poller (Part 4)."""
     w = get_wazuh_settings()
+    dispatcher = None
+    tw = get_worker_settings()
+    if tw.TRIAGE_ENABLED:
+        try:
+            adapter = build_adapter()   # a missing API key stops the worker here instead of failing every alert
+        except Exception as exc:
+            logger.error("Triage worker NOT started: %s", exc)
+        else:
+            dispatcher = Dispatcher(get_session_factory(), w.TRIAGE_WORKERS, tw.TRIAGE_SWEEP_SECONDS,
+                                    process=functools.partial(process_alert, adapter=adapter))
+            dispatcher.start()
     poller = None
     if w.WAZUH_INGEST_MODE == "poll":
         poller = Poller(
@@ -35,6 +51,8 @@ async def lifespan(app: FastAPI):
     yield
     if poller:
         poller.stop()
+    if dispatcher:
+        dispatcher.stop()
 
 
 app = FastAPI(
@@ -71,11 +89,7 @@ app.include_router(analytics.router, prefix="/api/v1")
 app.include_router(governance.router, prefix="/api/v1")
 app.include_router(evaluation.router, prefix="/api/v1")
 app.include_router(admin.router, prefix="/api/v1")
-# NOTE: The Wazuh webhook is intentionally mounted at /api/webhooks/wazuh (no /v1 prefix).
-# This matches the path documented in docs/wazuh_alert_source.md and configured in
-# the Wazuh server's integration block. Do NOT move it under /api/v1 without updating
-# both the Wazuh integration config and nginx.conf.
-app.include_router(webhook_router)  # POST /api/webhooks/wazuh
+app.include_router(webhook_router)  # Wazuh webhook (Part 4): POST /api/webhooks/wazuh
 
 
 @app.get("/")

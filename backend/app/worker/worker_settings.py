@@ -1,20 +1,27 @@
-"""Settings for the triage worker only (kept out of app/config.py)."""
+"""Triage worker settings. Kept separate from Asad's app/config.py so we never edit his file.
+Reads the same backend/.env file. TRIAGE_WORKERS (thread pool size) lives in app/ingestion/wazuh_settings.py."""
+from __future__ import annotations
+
 from functools import lru_cache
 from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-ROOT = Path(__file__).resolve().parents[3]   # repo root locally, /srv in the container
+_ENV_FILE = Path(__file__).resolve().parents[2] / ".env"  # backend/.env
 
 
 class WorkerSettings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=ROOT / ".env", extra="ignore", case_sensitive=False)
+    model_config = SettingsConfigDict(
+        env_file=_ENV_FILE if _ENV_FILE.exists() else ".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+        case_sensitive=False,
+    )
 
-    LLM_PROVIDER: str = "mock"            # mock | gemini | claude
     TRIAGE_ENABLED: bool = True
-    TRIAGE_WORKERS: int = 32
     TRIAGE_SWEEP_SECONDS: float = 5.0
-    MOCK_DELAY_MIN_SECONDS: float = 0.0   # simulated LLM latency for AC-19/AC-22
+    # Simulated model latency for the mock provider only (AC-19 / AC-22 load test uses 2 and 6).
+    MOCK_DELAY_MIN_SECONDS: float = 0.0
     MOCK_DELAY_MAX_SECONDS: float = 0.0
 
 

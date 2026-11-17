@@ -207,6 +207,15 @@ def test_hit_count_incremented_only_for_returned(factory):
     assert (hits(factory, new), hits(factory, mid), hits(factory, cut)) == (2, 2, 0)
 
 
+def test_count_hits_false_leaves_the_counter_alone(factory):
+    a, rule, sig = add_alert(factory)
+    ex = add_ex(factory, rule=rule, sig=sig)
+    with factory.begin() as s:
+        got = find_exemplars(s, alert_id=a, rule_id=rule, process_signature=sig, asset_criticality="MEDIUM",
+                             count_hits=False)
+    assert [g["id"] for g in got] == [ex] and hits(factory, ex) == 0
+
+
 def test_lookup_joins_callers_transaction(factory):
     a, rule, sig = add_alert(factory)
     ex = add_ex(factory, rule=rule, sig=sig)

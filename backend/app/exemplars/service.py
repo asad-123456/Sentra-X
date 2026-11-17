@@ -33,14 +33,16 @@ def _shape(row: Ex, match_tier: str) -> dict:
 
 
 def find_exemplars(session: Session, *, alert_id: uuid.UUID, rule_id: str,
-                   process_signature: Optional[str], asset_criticality: str) -> list[dict]:
+                   process_signature: Optional[str], asset_criticality: str,
+                   count_hits: bool = True) -> list[dict]:
     """At most 2 ACTIVE exemplars, most recent first.
 
     Tier 1: same rule_id AND same process_signature.
     Tier 2: fills the remaining slots with same rule_id AND same asset_criticality.
     A NULL signature never matches in Tier 1. Exemplars created from this very alert are excluded (a retry must not
     cite itself). A Tier 1 hit is never repeated in Tier 2. match_hit_count is incremented for every exemplar
-    returned. An empty list means zero-shot."""
+    returned, unless count_hits=False (used by read-only views such as the alert detail modal: a hit means the
+    exemplar was really injected into a prompt, not merely looked at). An empty list means zero-shot."""
     # IS DISTINCT FROM keeps rows whose source_alert_id is NULL (the FK is ON DELETE SET NULL).
     not_own = Ex.source_alert_id.is_distinct_from(alert_id)
     newest_first = (Ex.created_at.desc(), Ex.id.desc())
@@ -68,7 +70,7 @@ def find_exemplars(session: Session, *, alert_id: uuid.UUID, rule_id: str,
             stmt = stmt.where(Ex.id.not_in(already))
         picked += [(r, "Tier 2") for r in session.execute(stmt).scalars().all()]
 
-    if picked:
+    if picked and count_hits:
         session.execute(
             update(Ex).where(Ex.id.in_([r.id for r, _ in picked]))
             .values(match_hit_count=Ex.match_hit_count + 1)

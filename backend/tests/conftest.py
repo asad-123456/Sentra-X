@@ -6,3 +6,4 @@ exercises the demo-open routes without a token, so it needs DEMO_MODE=true. Test
 import os
 
 os.environ.setdefault("DEMO_MODE", "true")
+os.environ.setdefault("TRIAGE_ENABLED", "false")   # tests start the dispatcher themselves when they need it
