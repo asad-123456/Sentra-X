@@ -132,7 +132,7 @@ def run_all_api_tests():
     assert override_res.json()["exemplar_created"] is True
     print("✅ PASS: [POST /api/v1/alerts/.../decision] Submitted OVERRIDE and created feedback exemplar (FR-4)")
 
-    # 9b. Decision Submission: RETRY_AI (verifying status stays in awaiting and guardrails applied)
+    # 9b. Decision Submission: RETRY_AI (verifying status transitions to PENDING_REVIEW for AI worker re-triage)
     retry_alert_id = "al-9019"
     retry_res = client.post(
         f"/api/v1/alerts/{retry_alert_id}/decision",
@@ -141,7 +141,7 @@ def run_all_api_tests():
     assert retry_res.status_code == 200, f"RETRY_AI failed: {retry_res.text}"
     assert retry_res.json()["action_taken"] == "RETRY_AI"
     retry_detail = client.get(f"/api/v1/alerts/{retry_alert_id}").json()
-    assert retry_detail["alert"]["status"] in ("AWAITING_ANALYST", "NEEDS_MANUAL_TRIAGE")
+    assert retry_detail["alert"]["status"] in ("PENDING_REVIEW", "AWAITING_ANALYST", "NEEDS_MANUAL_TRIAGE")
     print(f"✅ PASS: [POST /api/v1/alerts/.../decision] RETRY_AI succeeded (Status: {retry_detail['alert']['status']})")
 
     # 10. Analytics KPI Summary

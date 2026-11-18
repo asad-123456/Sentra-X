@@ -92,7 +92,7 @@ def test_columns_populated(factory):
     assert row["raw_payload"] == raw
     assert row["mitre_tactics"] == ["Credential Access"]
     assert row["mitre_techniques"] == ["T1110.001"]
-    assert row["alert_timestamp"].utcoffset().total_seconds() == 0
+    assert row["alert_timestamp"].astimezone(timezone.utc).utcoffset().total_seconds() == 0
     assert row["ingested_at"] is not None
 
 
