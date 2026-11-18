@@ -1,0 +1,148 @@
+{
+  "timestamp": "2026-11-16T10:33:36.292+0000",
+  "rule": {
+    "level": 7,
+    "description": "File deleted.",
+    "id": "553",
+    "mitre": {
+      "id": [
+        "T1070.004",
+        "T1485"
+      ],
+      "tactic": [
+        "Defense Evasion",
+        "Impact"
+      ],
+      "technique": [
+        "File Deletion",
+        "Data Destruction"
+      ]
+    },
+    "firedtimes": 1,
+    "mail": false,
+    "groups": [
+      "ossec",
+      "syscheck",
+      "syscheck_entry_deleted",
+      "syscheck_file"
+    ],
+    "pci_dss": [
+      "11.5"
+    ],
+    "gpg13": [
+      "4.11"
+    ],
+    "gdpr": [
+      "II_5.1.f"
+    ],
+    "hipaa": [
+      "164.312.c.1",
+      "164.312.c.2"
+    ],
+    "nist_800_53": [
+      "SI.7"
+    ],
+    "tsc": [
+      "PI1.4",
+      "PI1.5",
+      "CC6.1",
+      "CC6.8",
+      "CC7.2",
+      "CC7.3"
+    ]
+  },
+  "agent": {
+    "id": "006",
+    "name": "Windows-PC",
+    "ip": "172.16.16.199"
+  },
+  "manager": {
+    "name": "wazuh-server"
+  },
+  "id": "1794825216.77512",
+  "full_log": "File 'c:\\fimtest\\test1.txt' deleted\nMode: realtime\n",
+  "syscheck": {
+    "path": "c:\\fimtest\\test1.txt",
+    "mode": "realtime",
+    "size_after": "10",
+    "win_perm_after": [
+      {
+        "name": "Administrators",
+        "allowed": [
+          "DELETE",
+          "READ_CONTROL",
+          "WRITE_DAC",
+          "WRITE_OWNER",
+          "SYNCHRONIZE",
+          "READ_DATA",
+          "WRITE_DATA",
+          "APPEND_DATA",
+          "READ_EA",
+          "WRITE_EA",
+          "EXECUTE",
+          "READ_ATTRIBUTES",
+          "WRITE_ATTRIBUTES"
+        ]
+      },
+      {
+        "name": "SYSTEM",
+        "allowed": [
+          "DELETE",
+          "READ_CONTROL",
+          "WRITE_DAC",
+          "WRITE_OWNER",
+          "SYNCHRONIZE",
+          "READ_DATA",
+          "WRITE_DATA",
+          "APPEND_DATA",
+          "READ_EA",
+          "WRITE_EA",
+          "EXECUTE",
+          "READ_ATTRIBUTES",
+          "WRITE_ATTRIBUTES"
+        ]
+      },
+      {
+        "name": "Users",
+        "allowed": [
+          "READ_CONTROL",
+          "SYNCHRONIZE",
+          "READ_DATA",
+          "READ_EA",
+          "EXECUTE",
+          "READ_ATTRIBUTES"
+        ]
+      },
+      {
+        "name": "Authenticated Users",
+        "allowed": [
+          "DELETE",
+          "READ_CONTROL",
+          "SYNCHRONIZE",
+          "READ_DATA",
+          "WRITE_DATA",
+          "APPEND_DATA",
+          "READ_EA",
+          "WRITE_EA",
+          "EXECUTE",
+          "READ_ATTRIBUTES",
+          "WRITE_ATTRIBUTES"
+        ]
+      }
+    ],
+    "uid_after": "S-1-5-32-544",
+    "md5_after": "e79bd3af1c144dd6c552f413ce7b7cc4",
+    "sha1_after": "5d407f5cf6cdaaee7570e7d109cac191f8cbe7b6",
+    "sha256_after": "df779faa3fb14e7c03ccb2f894af31fe39bc43246f44f2a93670e32570d6620b",
+    "attrs_after": [
+      "ARCHIVE"
+    ],
+    "uname_after": "Administrators",
+    "mtime_after": "2026-11-16T10:32:28",
+    "event": "deleted"
+  },
+  "decoder": {
+    "name": "syscheck_deleted"
+  },
+  "location": "syscheck"
+}

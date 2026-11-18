@@ -1,0 +1,75 @@
+{
+  "timestamp": "2026-10-31T12:18:55.469+0000",
+  "rule": {
+    "level": 10,
+    "description": "sshd: brute force trying to get access to the system. Non existent user.",
+    "id": "5712",
+    "mitre": {
+      "id": [
+        "T1110"
+      ],
+      "tactic": [
+        "Credential Access"
+      ],
+      "technique": [
+        "Brute Force"
+      ]
+    },
+    "frequency": 8,
+    "firedtimes": 1,
+    "mail": false,
+    "groups": [
+      "syslog",
+      "sshd",
+      "authentication_failures"
+    ],
+    "gdpr": [
+      "IV_35.7.d",
+      "IV_32.2"
+    ],
+    "hipaa": [
+      "164.312.b"
+    ],
+    "nist_800_53": [
+      "SI.4",
+      "AU.14",
+      "AC.7"
+    ],
+    "pci_dss": [
+      "11.4",
+      "10.2.4",
+      "10.2.5"
+    ],
+    "tsc": [
+      "CC6.1",
+      "CC6.8",
+      "CC7.2",
+      "CC7.3"
+    ]
+  },
+  "agent": {
+    "id": "003",
+    "name": "Wazuh-Endpoint-1",
+    "ip": "10.0.2.15"
+  },
+  "manager": {
+    "name": "wazuh-server"
+  },
+  "id": "1793449135.259402",
+  "previous_output": "Oct 31 12:18:47 Wazuh-Endpoint-1 sshd[38669]: Failed password for invalid user wronguser from 127.0.0.1 port 45072 ssh2\nOct 31 12:18:40 Wazuh-Endpoint-1 sshd[38669]: Failed password for invalid user wronguser from 127.0.0.1 port 45072 ssh2\nOct 31 12:18:36 Wazuh-Endpoint-1 sshd[38669]: Invalid user wronguser from 127.0.0.1 port 45072\nOct 31 12:17:46 Wazuh-Endpoint-1 sshd[38660]: Failed password for invalid user wronguser from 127.0.0.1 port 47410 ssh2\nOct 31 12:17:39 Wazuh-Endpoint-1 sshd[38660]: Failed password for invalid user wronguser from 127.0.0.1 port 47410 ssh2\nOct 31 12:17:30 Wazuh-Endpoint-1 sshd[38660]: Failed password for invalid user wronguser from 127.0.0.1 port 47410 ssh2\nOct 31 12:17:19 Wazuh-Endpoint-1 sshd[38660]: Invalid user wronguser from 127.0.0.1 port 47410",
+  "full_log": "Oct 31 12:18:53 Wazuh-Endpoint-1 sshd[38669]: Failed password for invalid user wronguser from 127.0.0.1 port 45072 ssh2",
+  "predecoder": {
+    "program_name": "sshd",
+    "timestamp": "Oct 31 12:18:53",
+    "hostname": "Wazuh-Endpoint-1"
+  },
+  "decoder": {
+    "parent": "sshd",
+    "name": "sshd"
+  },
+  "data": {
+    "srcip": "127.0.0.1",
+    "srcuser": "wronguser"
+  },
+  "location": "journald"
+}

@@ -1,0 +1,81 @@
+{
+  "timestamp": "2026-10-31T12:17:21.383+0000",
+  "rule": {
+    "level": 5,
+    "description": "sshd: Attempt to login using a non-existent user",
+    "id": "5710",
+    "mitre": {
+      "id": [
+        "T1110.001",
+        "T1021.004"
+      ],
+      "tactic": [
+        "Credential Access",
+        "Lateral Movement"
+      ],
+      "technique": [
+        "Password Guessing",
+        "SSH"
+      ]
+    },
+    "firedtimes": 1,
+    "mail": false,
+    "groups": [
+      "syslog",
+      "sshd",
+      "authentication_failed",
+      "invalid_login"
+    ],
+    "gdpr": [
+      "IV_35.7.d",
+      "IV_32.2"
+    ],
+    "gpg13": [
+      "7.1"
+    ],
+    "hipaa": [
+      "164.312.b"
+    ],
+    "nist_800_53": [
+      "AU.14",
+      "AC.7",
+      "AU.6"
+    ],
+    "pci_dss": [
+      "10.2.4",
+      "10.2.5",
+      "10.6.1"
+    ],
+    "tsc": [
+      "CC6.1",
+      "CC6.8",
+      "CC7.2",
+      "CC7.3"
+    ]
+  },
+  "agent": {
+    "id": "003",
+    "name": "Wazuh-Endpoint-1",
+    "ip": "10.0.2.15"
+  },
+  "manager": {
+    "name": "wazuh-server"
+  },
+  "id": "1793449041.254123",
+  "full_log": "Oct 31 12:17:19 Wazuh-Endpoint-1 sshd[38660]: Invalid user wronguser from 127.0.0.1 port 47410",
+  "predecoder": {
+    "program_name": "sshd",
+    "timestamp": "Oct 31 12:17:19",
+    "hostname": "Wazuh-Endpoint-1"
+  },
+  "decoder": {
+    "parent": "sshd",
+    "name": "sshd"
+  },
+  "data": {
+    "srcip": "127.0.0.1",
+    "srcport": "47410",
+    "srcuser": "wronguser"
+  },
+  "location": "journald"
+}

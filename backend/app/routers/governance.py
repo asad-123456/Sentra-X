@@ -4,17 +4,15 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status
-from fastapi.security import HTTPAuthorizationCredentials
-from jose import jwt
 from sqlalchemy import desc, func
 from sqlalchemy.orm import Session
 
-from ..auth import security
-from ..config import settings
+from ..auth import require_roles, security
 from ..database import get_db
 from ..models.asset import Asset
 from ..models.exemplar import FeedbackExemplar
 from ..models.user import User
+from ..security_log import security_log
 
 router = APIRouter(prefix="/governance", tags=["Governance & Feedback Calibration"])
 
@@ -32,25 +30,12 @@ def _resolve_username(created_by_uuid, db: Session) -> str:
     return str(created_by_uuid)
 
 
-def get_caller_user(
-    auth: Optional[HTTPAuthorizationCredentials] = Depends(security),
-    db: Session = Depends(get_db),
-) -> Optional[User]:
-    if auth and auth.credentials:
-        try:
-            token_payload = jwt.decode(
-                auth.credentials, settings.SECRET_KEY, algorithms=[settings.ALGORITHM]
-            )
-            sub = token_payload.get("sub")
-            if sub:
-                return db.query(User).filter(User.id == uuid.UUID(sub)).first()
-        except Exception:
-            pass
-    return None
-
 
 @router.get("/exemplars", response_model=List[Dict[str, Any]])
-def get_exemplars(db: Session = Depends(get_db)):
+def get_exemplars(
+    _: Optional[User] = Depends(require_roles("TeamLead", "Admin", demo_open=True)),
+    db: Session = Depends(get_db),
+):
     exemplars = db.query(FeedbackExemplar).order_by(desc(FeedbackExemplar.created_at)).all()
     results = []
     for ex in exemplars:
@@ -63,7 +48,7 @@ def get_exemplars(db: Session = Depends(get_db)):
                 "calibrated_verdict": ex.calibrated_verdict,
                 "calibrated_severity": ex.calibrated_severity,
                 "rationale": ex.rationale,
-                "match_tier_support": "Tier 1" if "procdump" in ex.process_signature or "powershell" in ex.process_signature else "Tier 2",
+                "match_tier_support": "Tier 1" if ex.process_signature else "Tier 2",
                 "match_hit_count": ex.match_hit_count,
                 "is_active": ex.is_active,
                 "created_by": _resolve_username(ex.created_by, db),
@@ -77,21 +62,17 @@ def get_exemplars(db: Session = Depends(get_db)):
 def toggle_exemplar_active(
     exemplar_id: str,
     payload: Dict[str, Any],
-    auth: Optional[HTTPAuthorizationCredentials] = Depends(security),
+    caller: Optional[User] = Depends(
+        require_roles(
+            "TeamLead",
+            demo_open=True,
+            forbidden_detail="HTTP 403 Forbidden: Only a Team Lead may revoke exemplars (FR-4, UC-10).",
+        )
+    ),
     db: Session = Depends(get_db),
 ):
-    caller = get_caller_user(auth, db)
-    if not caller and not settings.DEMO_MODE:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="HTTP 401 Unauthorized: Authentication credentials required.",
-        )
-    if caller and caller.role == "Analyst":
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="HTTP 403 Forbidden: Analyst role is prohibited from revoking exemplars (FR-4, UC-10).",
-        )
-
+    # require_roles checks the role and is_active in the database on every request. A "revoked_by" in the body is
+    # ignored on purpose: the revoker recorded is always the authenticated caller.
     try:
         ex_id_int = int(exemplar_id.replace("EX-", "").replace("ex-", ""))
     except ValueError:
@@ -106,29 +87,19 @@ def toggle_exemplar_active(
     else:
         new_active = not exemplar.is_active
 
+    was_active = exemplar.is_active
     exemplar.is_active = new_active
     if not new_active:
-        exemplar.revoked_at = datetime.now(timezone.utc)
-        revoked_by_raw = payload.get("revoked_by")
-        if revoked_by_raw:
-            try:
-                rev_user = db.query(User).filter(User.id == uuid.UUID(str(revoked_by_raw))).first()
-                if rev_user and rev_user.role == "Analyst":
-                    raise HTTPException(
-                        status_code=status.HTTP_403_FORBIDDEN,
-                        detail="HTTP 403 Forbidden: Analyst role is prohibited from revoking exemplars (FR-4, UC-10).",
-                    )
-                exemplar.revoked_by = uuid.UUID(str(revoked_by_raw))
-            except HTTPException:
-                raise
-            except Exception:
-                pass
-        elif caller:
-            exemplar.revoked_by = caller.id
+        if was_active:   # revoking an already revoked exemplar keeps the original who/when
+            exemplar.revoked_at = datetime.now(timezone.utc)
+            exemplar.revoked_by = caller.id if caller else None
     else:
         exemplar.revoked_at = None
+        exemplar.revoked_by = None
 
     db.commit()
+    security_log.info("exemplar_%s by=%s exemplar=%s", "reactivated" if new_active else "revoked",
+                      caller.username if caller else "demo", exemplar.id)
 
     return {
         "id": str(exemplar.id),
@@ -149,7 +120,10 @@ def toggle_exemplar_active(
 
 
 @router.get("/assets", response_model=List[Dict[str, Any]])
-def get_assets(db: Session = Depends(get_db)):
+def get_assets(
+    _: Optional[User] = Depends(require_roles("Analyst", "TeamLead", "Admin", demo_open=True)),
+    db: Session = Depends(get_db),
+):
     assets = db.query(Asset).order_by(Asset.agent_id).all()
     results = []
     for asset in assets:
@@ -172,35 +146,18 @@ def get_assets(db: Session = Depends(get_db)):
 def update_asset_criticality(
     agent_id: str,
     payload: Dict[str, Any],
-    auth: Optional[HTTPAuthorizationCredentials] = Depends(security),
+    caller: Optional[User] = Depends(
+        require_roles(
+            "TeamLead",
+            "Admin",
+            demo_open=True,
+            forbidden_detail="HTTP 403 Forbidden: Analyst role is prohibited from modifying asset criticality tiers (AC-17, FR-9).",
+        )
+    ),
     db: Session = Depends(get_db),
 ):
-    caller = get_caller_user(auth, db)
-    if not caller and not settings.DEMO_MODE:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="HTTP 401 Unauthorized: Authentication credentials required.",
-        )
-    if caller and caller.role == "Analyst":
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="HTTP 403 Forbidden: Analyst role is prohibited from modifying asset criticality tiers (AC-17, FR-9).",
-        )
-
-    updated_by_raw = payload.get("updated_by")
-    if updated_by_raw:
-        try:
-            user_obj = db.query(User).filter(User.id == uuid.UUID(str(updated_by_raw))).first()
-            if user_obj and user_obj.role == "Analyst":
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail="HTTP 403 Forbidden: Analyst role is prohibited from modifying asset criticality tiers (AC-17, FR-9).",
-                )
-        except HTTPException:
-            raise
-        except Exception:
-            pass
-
+    # Role and is_active are checked against the database by require_roles. Any "updated_by" in the request body is
+    # ignored on purpose: the editor recorded is always the authenticated caller (no identity spoofing).
     asset = db.query(Asset).filter(Asset.agent_id == agent_id).first()
     if not asset:
         raise HTTPException(status_code=404, detail=f"Asset {agent_id} not found.")
@@ -212,16 +169,15 @@ def update_asset_criticality(
             detail=f"HTTP 422: Invalid criticality_tier '{tier}'. Must be one of: 'LOW', 'MEDIUM', 'HIGH', 'CRITICAL'.",
         )
 
+    old_tier = asset.criticality_tier
     asset.criticality_tier = tier
     asset.updated_at = datetime.now(timezone.utc)
-    if updated_by_raw:
-        try:
-            asset.updated_by = uuid.UUID(str(updated_by_raw))
-        except Exception:
-            pass
-    elif caller:
+    if caller is not None:
         asset.updated_by = caller.id
     db.commit()
+    security_log.info(
+        "asset_updated by=%s agent=%s tier=%s->%s", caller.username if caller else "demo", agent_id, old_tier, tier
+    )
 
     return {
         "id": f"asset-{asset.agent_id}",
@@ -239,20 +195,15 @@ def update_asset_criticality(
 @router.post("/assets", response_model=Dict[str, Any])
 def register_asset(
     payload: Dict[str, Any],
-    auth: Optional[HTTPAuthorizationCredentials] = Depends(security),
+    caller: Optional[User] = Depends(
+        require_roles(
+            "Admin",
+            demo_open=True,
+            forbidden_detail="HTTP 403 Forbidden: Only Admin can register enterprise assets (UC-10, UC-11).",
+        )
+    ),
     db: Session = Depends(get_db),
 ):
-    caller = get_caller_user(auth, db)
-    if not caller and not settings.DEMO_MODE:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="HTTP 401 Unauthorized: Authentication credentials required.",
-        )
-    if caller and caller.role != "Admin":
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="HTTP 403 Forbidden: Only Admin can register enterprise assets (UC-10, UC-11).",
-        )
     agent_id = str(payload.get("agent_id", "")).strip()
     hostname = str(payload.get("hostname", "")).strip()
     ip_raw = payload.get("ip_address")

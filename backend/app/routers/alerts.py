@@ -485,10 +485,15 @@ def submit_alert_decision(
     elif action == "ESCALATE":
         alert.status = "ESCALATED"
     elif action == "RETRY_AI":
-        alert.status = "AWAITING_ANALYST"
+        alert.status = "PENDING_REVIEW"
         alert.retry_count = 0
         if ai:
             ai.retry_count = 0
+        try:
+            from ..worker.jobs import enqueue_triage
+            enqueue_triage(alert.id)
+        except Exception:
+            pass
             # Re-evaluate guardrails deterministically (rules engine)
             try:
                 from ..services.rules_engine import apply_guardrails

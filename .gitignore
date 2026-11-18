@@ -4,6 +4,12 @@
 gemini-docs/
 gemini-docs
 
+# AI Agent Configuration & Skills
+.agents/
+.claude/
+agent/
+skills-lock.json
+
 # Dependencies
 node_modules/
 frontend/node_modules/
@@ -77,3 +83,5 @@ desktop.ini
 .venv/
 .env
 __pycache__/
+alerts_raw.jsonl
+fim_alerts.jsonl

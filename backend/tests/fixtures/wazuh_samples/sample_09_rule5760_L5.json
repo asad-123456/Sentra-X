@@ -1,0 +1,78 @@
+{
+  "timestamp": "2026-10-31T12:19:29.493+0000",
+  "rule": {
+    "level": 5,
+    "description": "sshd: authentication failed.",
+    "id": "5760",
+    "mitre": {
+      "id": [
+        "T1110.001",
+        "T1021.004"
+      ],
+      "tactic": [
+        "Credential Access",
+        "Lateral Movement"
+      ],
+      "technique": [
+        "Password Guessing",
+        "SSH"
+      ]
+    },
+    "firedtimes": 1,
+    "mail": false,
+    "groups": [
+      "syslog",
+      "sshd",
+      "authentication_failed"
+    ],
+    "gdpr": [
+      "IV_35.7.d",
+      "IV_32.2"
+    ],
+    "gpg13": [
+      "7.1"
+    ],
+    "hipaa": [
+      "164.312.b"
+    ],
+    "nist_800_53": [
+      "AU.14",
+      "AC.7"
+    ],
+    "pci_dss": [
+      "10.2.4",
+      "10.2.5"
+    ],
+    "tsc": [
+      "CC6.1",
+      "CC6.8",
+      "CC7.2",
+      "CC7.3"
+    ]
+  },
+  "agent": {
+    "id": "003",
+    "name": "Wazuh-Endpoint-1",
+    "ip": "10.0.2.15"
+  },
+  "manager": {
+    "name": "wazuh-server"
+  },
+  "id": "1793449169.261778",
+  "full_log": "Oct 31 12:19:28 Wazuh-Endpoint-1 sshd[38672]: Failed password for vboxuser from 127.0.0.1 port 32974 ssh2",
+  "predecoder": {
+    "program_name": "sshd",
+    "timestamp": "Oct 31 12:19:28",
+    "hostname": "Wazuh-Endpoint-1"
+  },
+  "decoder": {
+    "parent": "sshd",
+    "name": "sshd"
+  },
+  "data": {
+    "srcip": "127.0.0.1",
+    "srcport": "32974",
+    "dstuser": "vboxuser"
+  },
+  "location": "journald"
+}

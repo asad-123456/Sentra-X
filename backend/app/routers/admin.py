@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import logging
+import re
+import secrets
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -11,11 +13,12 @@ from fastapi.security import HTTPAuthorizationCredentials
 from jose import jwt
 from sqlalchemy.orm import Session
 
-from ..auth import hash_password, security
+from ..auth import hash_password, require_roles, security
 from ..config import settings
 from ..database import get_db
 from ..models.system_configuration import SystemConfiguration
 from ..models.user import User
+from ..security_log import security_log
 from ..utils import parse_uuid
 
 logger = logging.getLogger("sentrax.admin")
@@ -23,36 +26,12 @@ logger = logging.getLogger("sentrax.admin")
 router = APIRouter(prefix="/admin", tags=["Admin & System Configuration"])
 
 
-def verify_admin_access(
-    auth: Optional[HTTPAuthorizationCredentials] = Depends(security),
-    db: Session = Depends(get_db),
-) -> None:
-    """Enforces AC-16 (FR-8): non-Admin callers receive HTTP 403 Forbidden on user administration."""
-    if not auth or not auth.credentials:
-        if settings.DEMO_MODE:
-            return
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="HTTP 401 Unauthorized: Authentication credentials required.",
-        )
-    try:
-        token_payload = jwt.decode(
-            auth.credentials, settings.SECRET_KEY, algorithms=[settings.ALGORITHM]
-        )
-        role = token_payload.get("role")
-        if role != "Admin":
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="HTTP 403 Forbidden: Non-Admin callers are prohibited from administering users (AC-16, FR-8).",
-            )
-    except HTTPException:
-        raise
-    except Exception as exc:
-        if not settings.DEMO_MODE:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="HTTP 401 Unauthorized: Invalid or expired authentication token.",
-            ) from exc
+# AC-16 (FR-8): only Admin may administer users. The role is read from the database on every request.
+verify_admin_access = require_roles(
+    "Admin",
+    demo_open=True,
+    forbidden_detail="HTTP 403 Forbidden: Non-Admin callers are prohibited from administering users (AC-16, FR-8).",
+)
 
 
 @router.get("/users", response_model=List[Dict[str, Any]])
@@ -80,7 +59,7 @@ def get_users(
 def update_user_role(
     user_id: str,
     payload: Dict[str, Any],
-    _: None = Depends(verify_admin_access),
+    admin: Optional[User] = Depends(verify_admin_access),
     db: Session = Depends(get_db),
 ):
     uid = parse_uuid(user_id)
@@ -95,8 +74,15 @@ def update_user_role(
             detail=f"HTTP 422: Invalid role '{role}'. Must be one of: 'Analyst', 'TeamLead', 'Admin'.",
         )
 
+    if admin is not None and uid == admin.id and role != "Admin":
+        raise HTTPException(status_code=400, detail="HTTP 400: Admins cannot demote themselves.")
+
+    old_role = user.role
     user.role = role
     db.commit()
+    security_log.info(
+        "user_role_changed by=%s target=%s %s->%s", admin.username if admin else "demo", user.username, old_role, role
+    )
 
     return {
         "id": str(user.id),
@@ -112,7 +98,7 @@ def update_user_role(
 def toggle_user_status(
     user_id: str,
     payload: Dict[str, Any],
-    _: None = Depends(verify_admin_access),
+    admin: Optional[User] = Depends(verify_admin_access),
     db: Session = Depends(get_db),
 ):
     uid = parse_uuid(user_id)
@@ -120,8 +106,15 @@ def toggle_user_status(
     if not user:
         raise HTTPException(status_code=404, detail="User not found.")
 
-    user.is_active = bool(payload.get("is_active", not user.is_active))
+    new_active = bool(payload.get("is_active", not user.is_active))
+    if admin is not None and uid == admin.id and not new_active:
+        raise HTTPException(status_code=400, detail="HTTP 400: Admins cannot deactivate themselves.")
+
+    user.is_active = new_active
     db.commit()
+    security_log.info(
+        "user_status_changed by=%s target=%s active=%s", admin.username if admin else "demo", user.username, new_active
+    )
 
     return {
         "id": str(user.id),
@@ -136,7 +129,7 @@ def toggle_user_status(
 @router.post("/users", response_model=Dict[str, Any])
 def create_user(
     payload: Dict[str, Any],
-    _: None = Depends(verify_admin_access),
+    admin: Optional[User] = Depends(verify_admin_access),
     db: Session = Depends(get_db),
 ):
     username = str(payload.get("username", "")).strip()
@@ -155,11 +148,35 @@ def create_user(
             detail=f"HTTP 422: Invalid role '{role}'. Must be one of: 'Analyst', 'TeamLead', 'Admin'.",
         )
 
+    if not re.fullmatch(r"[A-Za-z0-9._-]{3,64}", username):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="HTTP 422: Username must be 3-64 characters (letters, digits, '.', '_' or '-').",
+        )
+    if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email) or len(email) > 255:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="HTTP 422: Invalid email address.")
+
+    # The admin UI has no password field: use DEFAULT_NEW_USER_PASSWORD if configured, otherwise generate a random
+    # temporary password and return it once in the response. A password supplied by the caller must be 8-72 bytes.
+    raw_password = payload.get("password")
+    generated_password = None
+    if raw_password in (None, ""):
+        if settings.DEFAULT_NEW_USER_PASSWORD:
+            raw_password = settings.DEFAULT_NEW_USER_PASSWORD
+        else:
+            raw_password = generated_password = secrets.token_urlsafe(12)
+    else:
+        raw_password = str(raw_password)
+        if not 8 <= len(raw_password.encode("utf-8")) <= 72:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="HTTP 422: Password must be 8 to 72 bytes long.",
+            )
+
     existing = db.query(User).filter((User.username == username) | (User.email == email)).first()
     if existing:
         raise HTTPException(status_code=409, detail="Username or email already exists.")
 
-    raw_password = payload.get("password") or "sentrax2026"
     new_user = User(
         id=uuid.uuid4(),
         username=username,
@@ -171,8 +188,11 @@ def create_user(
     db.add(new_user)
     db.commit()
     db.refresh(new_user)
+    security_log.info(
+        "user_created by=%s new_user=%s role=%s", admin.username if admin else "demo", new_user.username, new_user.role
+    )
 
-    return {
+    result = {
         "id": str(new_user.id),
         "username": new_user.username,
         "email": new_user.email,
@@ -180,6 +200,9 @@ def create_user(
         "is_active": new_user.is_active,
         "created_at": str(new_user.created_at),
     }
+    if generated_password:  # shown once, never stored in clear text
+        result["temporary_password"] = generated_password
+    return result
 
 
 CONFIG_FILE_PATH = Path(__file__).resolve().parent.parent / "system_config.json"
@@ -277,5 +300,18 @@ def update_system_config(
     _: None = Depends(verify_admin_access),
     db: Session = Depends(get_db),
 ):
+    if "min_rule_level" in payload:
+        try:
+            mrl = int(payload["min_rule_level"])
+            if not 0 <= mrl <= 9:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail="HTTP 422: min_rule_level must be between 0 and 9 (rule levels 10+ represent critical alerts and cannot be suppressed).",
+                )
+        except ValueError:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="HTTP 422: min_rule_level must be an integer.",
+            )
     return _save_system_config(payload, db)
 

@@ -181,6 +181,9 @@ class EvaluationRunner:
         rep = report or cls.get_latest_report()
         lines = [
             "# Sentra-X Adversarial Benchmark & Model Evaluation Report",
+            "> [!WARNING]",
+            "> **NOTICE:** SIMULATED FIXTURE, not measured (Preliminary architectural mockup — pending live runner execution).",
+            "",
             f"**Evaluation Timestamp:** {rep.get('timestamp')}",
             f"**Dataset:** {rep.get('dataset_name')} (Total Payloads: {rep.get('total_payloads')})",
             f"**NFR-3 Target Achieved:** {'Yes (0% Prompt Injection Bypass)' if rep.get('nfr3_target_achieved') else 'No'}",
@@ -217,6 +220,7 @@ class EvaluationRunner:
         """Render report into CSV format for data science and auditing."""
         rep = report or cls.get_latest_report()
         output = io.StringIO()
+        output.write("# NOTICE: SIMULATED FIXTURE, not measured (Preliminary architectural mockup - pending live runner execution)\n")
         writer = csv.writer(output)
         writer.writerow([
             "Payload ID",
