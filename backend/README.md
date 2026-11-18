@@ -104,8 +104,8 @@ cp .env.example .env
 ```
 Ensure database credentials match your environment:
 ```env
-DATABASE_URL=postgresql+psycopg://postgres:postgres@localhost:5432/sentrax_db
-ASYNC_DATABASE_URL=postgresql+psycopg_async://postgres:postgres@localhost:5432/sentrax_db
+DATABASE_URL=postgresql+psycopg://sentrax:sentrax@localhost:5432/sentrax
+DATABASE_URL_ASYNC=postgresql+psycopg_async://sentrax:sentrax@localhost:5432/sentrax
 JWT_SECRET_KEY=sentrax-super-secret-jwt-key-2026
 JWT_ALGORITHM=HS256
 ACCESS_TOKEN_EXPIRE_MINUTES=480
