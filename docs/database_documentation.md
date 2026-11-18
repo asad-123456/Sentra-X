@@ -231,7 +231,7 @@ Stores raw and normalized alerts ingested from Wazuh (`FR-1`, `FR-5`).
 | `agent_id` | `VARCHAR(64)` | No | `FOREIGN KEY (agent_id) REFERENCES assets(agent_id) ON DELETE RESTRICT` | Target host agent where detection occurred. |
 | `src_ip` | `VARCHAR(45)` | Yes | None | Source / Attacker IP address extracted from telemetry. |
 | `process_signature`| `TEXT` | Yes | None | Normalized process/script execution string for Tier 1 few-shot matching. |
-| `raw_payload` | `JSONB` | No | None | Complete unaltered upstream Wazuh JSON telemetry payload. |
+| `raw_payload` | `JSONB` | Yes | None | Complete unaltered upstream Wazuh JSON telemetry payload (nullable for truncated edge alerts). |
 | `mitre_tactics` | `JSONB` | No | `DEFAULT '[]'::jsonb` | Parsed array of MITRE ATT&CK tactics (e.g., `["Credential Access"]`). |
 | `mitre_techniques`| `JSONB` | No | `DEFAULT '[]'::jsonb` | Parsed array of MITRE ATT&CK technique IDs (e.g., `["T1003.001"]`). |
 | `status` | `VARCHAR(32)` | No | `DEFAULT 'PENDING_REVIEW'`, `CHECK (status IN ('PENDING_REVIEW', 'AWAITING_ANALYST', 'NEEDS_MANUAL_TRIAGE', 'ESCALATED', 'CLOSED'))` | Five-state closed-loop finite state machine status (§6.4). |
@@ -276,8 +276,8 @@ Stores LLM inference evaluations alongside post-guardrail effective dispositions
 | `abstention_triggered`| `BOOLEAN`| No | `DEFAULT FALSE` | True if confidence $< 0.60$, citations were empty/invalid, or contradiction occurred. |
 | `guardrail_audit_note`| `TEXT` | Yes | None | Explanatory note detailing which deterministic rule intervened. |
 | `llm_provider` | `VARCHAR(32)` | Yes | None | Active adapter provider (`gemini`, `claude`, or `mock`). |
-| `model_name` | `VARCHAR(64)` | No | None | Specific LLM model identifier (e.g. `gemini-3.1-flash-lite`). |
-| `inference_latency_ms`| `INTEGER` | No | Alias: `latency_ms` | Outbound LLM API round-trip inference latency in milliseconds. |
+| `model_name` | `VARCHAR(64)` | Yes | None | Specific LLM model identifier (nullable if inference aborted before model dispatch). |
+| `inference_latency_ms`| `INTEGER` | Yes | Alias: `latency_ms` | Outbound LLM API round-trip inference latency in milliseconds (nullable on network failure). |
 | `retry_count` | `SMALLINT` | No | `DEFAULT 0`, `CHECK (retry_count BETWEEN 0 AND 3)` | Automated API retry attempts (times out after 3 retries $\to$ `NEEDS_MANUAL_TRIAGE`). |
 | `created_at` | `TIMESTAMPTZ` | No | `DEFAULT NOW()` | Initial assessment creation timestamp. |
 | `updated_at` | `TIMESTAMPTZ` | No | `DEFAULT NOW()` | Assessment update timestamp (refreshed on `Retry AI` upsert per ADR 8.5). |

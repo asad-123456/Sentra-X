@@ -300,5 +300,18 @@ def update_system_config(
     _: None = Depends(verify_admin_access),
     db: Session = Depends(get_db),
 ):
+    if "min_rule_level" in payload:
+        try:
+            mrl = int(payload["min_rule_level"])
+            if not 0 <= mrl <= 9:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail="HTTP 422: min_rule_level must be between 0 and 9 (rule levels 10+ represent critical alerts and cannot be suppressed).",
+                )
+        except ValueError:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="HTTP 422: min_rule_level must be an integer.",
+            )
     return _save_system_config(payload, db)
 
