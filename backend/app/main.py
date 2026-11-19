@@ -17,6 +17,7 @@ from .ingestion.sources import IndexerSource
 from .ingestion.wazuh_settings import get_wazuh_settings
 from .ingestion.webhook import router as webhook_router
 from .routers import admin, alerts, analytics, auth, evaluation, governance
+from .worker.triage_worker import start_worker, stop_worker
 
 logger = logging.getLogger("sentrax.api")
 
@@ -32,7 +33,9 @@ async def lifespan(app: FastAPI):
             get_session_factory(), w.WAZUH_POLL_INTERVAL_SECONDS, w.WAZUH_MIN_LEVEL,
         )
         poller.start()
+    start_worker()       # PENDING_REVIEW -> AWAITING_ANALYST (Part 6B)
     yield
+    stop_worker()
     if poller:
         poller.stop()
 

@@ -4,5 +4,4 @@ The default is DEMO_MODE=false (production-safe). Asad's endpoint suite (test_ap
 exercises the demo-open routes without a token, so it needs DEMO_MODE=true. Tests that check real authentication
 (test_auth_hardening.py, test_assets.py) switch DEMO_MODE off themselves with monkeypatch."""
 import os
-
-os.environ.setdefault("DEMO_MODE", "true")
+os.environ.setdefault("TRIAGE_ENABLED", "false")   # tests never start the background worker
