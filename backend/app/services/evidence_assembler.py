@@ -15,6 +15,8 @@ import re
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any, Sequence
+from uuid import UUID
+import ipaddress
 
 from app.services.prompt_sanitizer import sanitize_value
 
@@ -61,6 +63,10 @@ class EvidencePack:
     injection_suspect: bool         # -> evidence_packs.injection_suspect
     injected_exemplar_ids: list[int | str]  # -> evidence_packs.injected_exemplar_ids
     findings: list[str] = field(default_factory=list)  # logging/debug only
+
+def _json_id(exemplar_id: int | str | UUID) -> int | str:
+       """Exemplar ids go into a JSONB column, which cannot hold a UUID object."""
+       return str(exemplar_id) if isinstance(exemplar_id, UUID) else exemplar_id
 
 
 # --- helpers ----------------------------------------------------------------
@@ -134,6 +140,18 @@ def _neutralize_keys(value: Any) -> Any:
 
 
 # --- correlation ------------------------------------------------------------
+def is_correlatable_ip(ip: str | None) -> bool:
+    """False for empty, loopback and unspecified addresses: unrelated hosts share them."""
+    if not ip:
+        return False
+    try:
+        addr = ipaddress.ip_address(ip.strip())
+    except ValueError:
+        return True  # unparseable text keeps the old exact-match behaviour
+    if isinstance(addr, ipaddress.IPv6Address) and addr.ipv4_mapped is not None:
+        addr = addr.ipv4_mapped
+    return not (addr.is_loopback or addr.is_unspecified)
+
 def select_correlated(
     alert: AlertRecord,
     candidates: Sequence[CorrelatedAlert],
@@ -152,7 +170,11 @@ def select_correlated(
         if not (earliest <= ts <= ref):
             continue
         same_agent = c.agent_id is not None and c.agent_id == alert.agent_id
-        same_ip = c.src_ip is not None and c.src_ip == alert.src_ip
+        same_ip = (
+            c.src_ip is not None
+            and is_correlatable_ip(alert.src_ip)
+            and c.src_ip == alert.src_ip
+        )
         if same_agent or same_ip:
             matches.append((ts, c))
     matches.sort(key=lambda pair: pair[0], reverse=True)
@@ -209,7 +231,7 @@ def assemble_evidence_pack(
     alert: AlertRecord,
     criticality_tier: str | None,
     candidate_alerts: Sequence[CorrelatedAlert] = (),
-    exemplar_ids: Sequence[int | str] = (),
+    exemplar_ids: Sequence[int | str | UUID] = (),
     k: int = MAX_CORRELATED,
     window: timedelta = CORRELATION_WINDOW,
 ) -> EvidencePack:
@@ -246,6 +268,6 @@ def assemble_evidence_pack(
         pack=pack,
         valid_dot_keys=valid_keys,
         injection_suspect=result.injection_suspect,
-        injected_exemplar_ids=list(exemplar_ids)[:MAX_EXEMPLARS],
+        injected_exemplar_ids=[_json_id(i) for i in list(exemplar_ids)[:MAX_EXEMPLARS]],
         findings=result.findings,
     )

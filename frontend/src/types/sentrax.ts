@@ -342,9 +342,12 @@ export interface EvaluationReport {
   timestamp: string;
   dataset_name: string;
   total_payloads: number;
-  baseline_bypass_rate: number;
-  sentrax_bypass_rate: number;
+  baseline_bypass_rate: number | null;
+  sentrax_bypass_rate: number | null;
   nfr3_target_achieved: boolean;
+  result: 'passed' | 'failed' | 'inconclusive';
+  is_dry_run: boolean;
+  notice: string;
   comparative_metrics: BenchmarkComparativeScorecard[];
   adversarial_suite: BenchmarkPayload[];
 }

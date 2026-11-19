@@ -141,6 +141,23 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 
 ## 6. Automated Testing & Verification
 
+The normal Uvicorn and Compose startup paths start the triage worker in the API
+process. For a local smoke test, use a disposable PostgreSQL database with the
+migrations applied and set `LLM_PROVIDER=mock` in `backend/.env` or the process
+environment. `TRIAGE_ENABLED=false` disables the worker. Run one API process for
+this deployment. The pending-row sweep recovers queued work after a restart.
+
+Replay an alert from `tests/fixtures/replay/ac1_100.jsonl` into the disposable
+database while the API runs. A qualifying alert should reach
+`AWAITING_ANALYST` and have an evidence pack and an assessment. To verify
+recovery, ingest a fresh alert while the worker is disabled, then restart with
+the worker enabled and check that the pending alert reaches the same state.
+
+Benchmark report reads return `null` until an admin explicitly runs the
+evaluation. Exports return 404 until a report exists. Each run is held in the
+API process memory. Mock results identify themselves as dry runs, and provider
+errors make a run inconclusive.
+
 ```bash
 # 1. Execute the comprehensive 16-endpoint REST integration test suite:
 python tests/test_api_endpoints.py

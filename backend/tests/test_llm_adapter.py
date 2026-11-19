@@ -1,5 +1,6 @@
 import json
 from datetime import datetime, timezone
+from types import SimpleNamespace
 
 import pytest
 
@@ -7,6 +8,7 @@ from app.services.evidence_assembler import AlertRecord, assemble_evidence_pack
 from app.services.llm_adapter import (
     BACKOFF_SECONDS,
     CLAUDE_TOOL_SCHEMA,
+    DEFAULT_CLAUDE_MODEL,
     GEMINI_RESPONSE_SCHEMA,
     SYSTEM_PROMPT,
     ClaudeAdapter,
@@ -370,3 +372,22 @@ def test_provider_schemas_match_the_pydantic_model():
     assert set(CLAUDE_TOOL_SCHEMA["properties"]) == fields
     assert set(GEMINI_RESPONSE_SCHEMA["properties"]) == fields
     assert set(GEMINI_RESPONSE_SCHEMA["required"]) == fields
+
+
+def test_default_claude_request_omits_sampling_parameters(monkeypatch):
+    adapter = ClaudeAdapter("test-key")
+
+    def create(**kwargs):
+        assert kwargs["model"] == DEFAULT_CLAUDE_MODEL
+        assert not {"temperature", "top_p", "top_k"}.intersection(kwargs)
+        return SimpleNamespace(content=[SimpleNamespace(type="tool_use", input={"ok": True})])
+
+    monkeypatch.setattr(adapter._client.messages, "create", create)
+    assert json.loads(adapter.generate("system", "user", 10.0)) == {"ok": True}
+
+def test_adapters_expose_provider_names(monkeypatch):
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    assert MockAdapter().provider_name == "mock"
+    assert get_adapter("gemini").provider_name == "gemini"
+    assert get_adapter("claude").provider_name == "claude"

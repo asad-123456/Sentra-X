@@ -13,13 +13,11 @@ import {
 } from 'lucide-react';
 import type {
   EvaluationReport,
-  BenchmarkPayload,
   SystemConfig,
   User,
   UserRole,
 } from '../types/sentrax';
 import {
-  getBenchmarkSuite,
   getBenchmarkReport,
   runBenchmarkEvaluation,
   getSystemConfig,
@@ -43,7 +41,6 @@ export const EvaluationRunnerView: React.FC = () => {
 
   // Benchmark State
   const [report, setReport] = useState<EvaluationReport | null>(null);
-  const [payloads, setPayloads] = useState<BenchmarkPayload[]>([]);
   const [loadingBenchmark, setLoadingBenchmark] = useState(true);
   const [runningBenchmark, setRunningBenchmark] = useState(false);
 
@@ -77,10 +74,9 @@ export const EvaluationRunnerView: React.FC = () => {
   const loadBenchmarkData = () => {
     setLoadingBenchmark(true);
     setError(null);
-    Promise.all([getBenchmarkReport(), getBenchmarkSuite()])
-      .then(([reportData, suiteData]) => {
+    getBenchmarkReport()
+      .then((reportData) => {
         setReport(reportData);
-        setPayloads(suiteData);
         setLoadingBenchmark(false);
       })
       .catch((err: unknown) => {
@@ -108,11 +104,10 @@ export const EvaluationRunnerView: React.FC = () => {
 
   useEffect(() => {
     let isCancelled = false;
-    Promise.all([getBenchmarkReport(), getBenchmarkSuite()])
-      .then(([reportData, suiteData]) => {
+    getBenchmarkReport()
+      .then((reportData) => {
         if (!isCancelled) {
           setReport(reportData);
-          setPayloads(suiteData);
           setLoadingBenchmark(false);
         }
       })
@@ -151,7 +146,6 @@ export const EvaluationRunnerView: React.FC = () => {
     try {
       const updatedReport = await runBenchmarkEvaluation('SENTRAX_FULL');
       setReport(updatedReport);
-      setPayloads(updatedReport.adversarial_suite);
     } catch (err) {
       console.error('Failed to run benchmark:', err);
       setActionError(err instanceof Error ? err.message : 'Benchmark evaluation run failed.');
@@ -230,6 +224,9 @@ export const EvaluationRunnerView: React.FC = () => {
   const handleExportCSV = () => {
     if (!report) return;
     const rows = [
+      ['Run Result', 'Notice'],
+      [report.result, `"${report.notice.replace(/"/g, '""')}"`],
+      [],
       ['Metric Name', 'Baseline Raw LLM Value', 'Sentra-X Value', 'Research Delta', 'NFR-3 Target Met'],
       ...report.comparative_metrics.map((m) => [
         `"${m.metric_name.replace(/"/g, '""')}"`,
@@ -273,9 +270,11 @@ export const EvaluationRunnerView: React.FC = () => {
             <h1 className="text-xl font-bold tracking-tight text-zinc-50 font-mono">
               Adversarial Benchmark
             </h1>
-            <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-zinc-900 text-zinc-400 border border-zinc-800">
-              Simulated Demo Fixture
-            </span>
+            {report?.is_dry_run && (
+              <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-zinc-900 text-zinc-400 border border-zinc-800">
+                Dry Run
+              </span>
+            )}
           </div>
           <p className="text-xs text-zinc-400 mt-0.5">
             Prompt injection test suite and comparative evaluation scorecard.
@@ -288,13 +287,13 @@ export const EvaluationRunnerView: React.FC = () => {
           <button
             type="button"
             onClick={handleRunBenchmark}
-            disabled={runningBenchmark}
+            disabled={runningBenchmark || loadingBenchmark}
             className="px-4 py-2 rounded-lg bg-zinc-100 text-zinc-950 font-mono text-xs font-semibold hover:bg-zinc-200 transition-colors flex items-center gap-2 shadow-sm disabled:opacity-50"
           >
             {runningBenchmark ? (
               <>
                 <Loader2 className="size-3.5 animate-spin text-zinc-950" />
-                <span>Evaluating 30 Payloads...</span>
+                <span>Running benchmark...</span>
               </>
             ) : (
               <>
@@ -309,7 +308,8 @@ export const EvaluationRunnerView: React.FC = () => {
             <button
               type="button"
               onClick={() => setShowExportMenu(!showExportMenu)}
-              className="px-3.5 py-2 rounded-lg bg-zinc-900 border border-zinc-800 text-xs font-mono text-zinc-200 hover:text-zinc-50 hover:bg-zinc-800 transition-colors flex items-center gap-1.5 cursor-pointer"
+              disabled={!report}
+              className="px-3.5 py-2 rounded-lg bg-zinc-900 border border-zinc-800 text-xs font-mono text-zinc-200 hover:text-zinc-50 hover:bg-zinc-800 transition-colors flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
             >
               <Download className="size-3.5" />
               <span>Export Report</span>
@@ -424,19 +424,15 @@ export const EvaluationRunnerView: React.FC = () => {
                 Loading adversarial test suite and benchmark scores...
               </div>
             </div>
-          ) : (
+          ) : report ? (
             <>
-              {/* Executive Scorecard Ribbon */}
+              <p className="text-xs text-zinc-400">{report.notice}</p>
               <ScorecardRibbon report={report} isRunning={runningBenchmark} />
-
-              {/* Comparative Metrics Scorecard Table */}
-              {report && (
-                <ComparativeMetricsTable metrics={report.comparative_metrics} />
-              )}
-
-              {/* 30-Payload Adversarial Test Suite Table */}
-              <AdversarialSuiteTable payloads={payloads} />
+              <ComparativeMetricsTable metrics={report.comparative_metrics} inconclusive={report.result === 'inconclusive'} />
+              <AdversarialSuiteTable payloads={report.adversarial_suite} />
             </>
+          ) : (
+            <p className="text-sm text-zinc-400">Run the benchmark to see results.</p>
           )}
         </div>
       )}

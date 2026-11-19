@@ -3,20 +3,16 @@ import { ShieldCheck, AlertTriangle, TrendingUp, Lock } from 'lucide-react';
 import type { EvaluationReport } from '../../types/sentrax';
 
 interface ScorecardRibbonProps {
-  report: EvaluationReport | null;
+  report: EvaluationReport;
   isRunning: boolean;
 }
 
 export const ScorecardRibbon: React.FC<ScorecardRibbonProps> = ({ report, isRunning }) => {
-  const baselineRate = report ? report.baseline_bypass_rate.toFixed(1) : '53.3';
-  const sentraxRate = report ? report.sentrax_bypass_rate.toFixed(1) : '0.0';
-  const totalPayloads = report?.total_payloads ?? 30;
-  const baselineBypassed = report?.adversarial_suite
-    ? report.adversarial_suite.filter((p) => p.baseline_bypassed).length
-    : Math.round(((report?.baseline_bypass_rate ?? 53.3) / 100) * totalPayloads);
-  const sentraxBypassed = report?.adversarial_suite
-    ? report.adversarial_suite.filter((p) => p.sentrax_bypassed).length
-    : Math.round(((report?.sentrax_bypass_rate ?? 0.0) / 100) * totalPayloads);
+  const formatRate = (rate: number | null) => rate === null ? 'Unavailable' : `${rate.toFixed(1)}%`;
+  const baselineBypassed = report.adversarial_suite.filter((payload) => payload.baseline_bypassed).length;
+  const sentraxBypassed = report.adversarial_suite.filter((payload) => payload.sentrax_bypassed).length;
+  const f1 = report.comparative_metrics.find((metric) => metric.metric_name.includes('F1'));
+  const safetyFloor = report.comparative_metrics.find((metric) => metric.metric_name.startsWith('Safety Floor'));
 
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -30,12 +26,14 @@ export const ScorecardRibbon: React.FC<ScorecardRibbonProps> = ({ report, isRunn
         </div>
         <div className="flex items-baseline gap-2">
           <span className={`text-2xl font-bold font-mono tracking-tight text-red-400 ${isRunning ? 'animate-pulse' : ''}`}>
-            {baselineRate}%
+            {formatRate(report.baseline_bypass_rate)}
           </span>
-          <span className="text-xs text-zinc-500 font-mono">{baselineBypassed} of {totalPayloads} Bypassed</span>
+          {report.baseline_bypass_rate !== null && (
+            <span className="text-xs text-zinc-500 font-mono">{baselineBypassed} of {report.total_payloads} bypassed</span>
+          )}
         </div>
         <div className="mt-3 pt-2.5 border-t border-zinc-900 text-[11px] text-zinc-500 leading-tight">
-          Direct prompt injection in raw logs successfully altered classification verdicts to False Positive.
+          Unreviewed dismissals in the raw model run.
         </div>
       </div>
 
@@ -50,14 +48,16 @@ export const ScorecardRibbon: React.FC<ScorecardRibbonProps> = ({ report, isRunn
         </div>
         <div className="flex items-baseline gap-2">
           <span className={`text-2xl font-bold font-mono tracking-tight text-emerald-400 ${isRunning ? 'animate-pulse' : ''}`}>
-            {sentraxRate}%
+            {formatRate(report.sentrax_bypass_rate)}
           </span>
-          <span className="text-[10px] font-mono uppercase px-1.5 py-0.5 rounded bg-emerald-950/70 border border-emerald-700/60 text-emerald-300">
-            Target Met
+          <span className="text-[10px] font-mono uppercase px-1.5 py-0.5 rounded border border-zinc-700 text-zinc-200">
+            {report.result}
           </span>
         </div>
         <div className="mt-3 pt-2.5 border-t border-zinc-900 text-[11px] text-zinc-400 leading-tight">
-          {sentraxBypassed} of {totalPayloads} bypassed. {sentraxBypassed === 0 ? '100% neutralized' : `${(((totalPayloads - sentraxBypassed) / totalPayloads) * 100).toFixed(1)}% neutralized`} via strict JSON enveloping, delimiter stripping, and safety floor.
+          {report.sentrax_bypass_rate === null
+            ? 'The guarded run did not complete every case.'
+            : `${sentraxBypassed} of ${report.total_payloads} bypassed.`}
         </div>
       </div>
 
@@ -71,31 +71,29 @@ export const ScorecardRibbon: React.FC<ScorecardRibbonProps> = ({ report, isRunn
         </div>
         <div className="flex items-baseline gap-2">
           <span className="text-2xl font-bold font-mono tracking-tight text-zinc-100">
-            +15.6%
+            {report.result === 'inconclusive' ? 'Unavailable' : f1?.research_delta ?? 'Unavailable'}
           </span>
-          <span className="text-xs text-zinc-500 font-mono">0.798 → 0.954</span>
         </div>
         <div className="mt-3 pt-2.5 border-t border-zinc-900 text-[11px] text-zinc-500 leading-tight">
-          Grounding citations and dynamic few-shot feedback significantly improved precision and recall.
+          Change in F1 from baseline to guarded triage.
         </div>
       </div>
 
       {/* 4. Safety Floor Enforcement Rate */}
       <div className="bg-zinc-950 border border-zinc-800/80 rounded-xl p-4 flex flex-col justify-between hover:border-zinc-700/60 transition-all">
         <div className="flex items-center justify-between text-xs font-mono text-zinc-400 mb-2">
-          <span>SAFETY FLOOR ENFORCEMENT</span>
+          <span>SAFETY FLOOR</span>
           <div className="size-6 rounded-md bg-zinc-900 border border-zinc-800 flex items-center justify-center text-zinc-300">
             <Lock className="size-3.5" />
           </div>
         </div>
         <div className="flex items-baseline gap-2">
           <span className="text-2xl font-bold font-mono tracking-tight text-zinc-100">
-            100.0%
+            {report.result === 'inconclusive' ? 'Unavailable' : safetyFloor?.sentrax_value ?? 'Unavailable'}
           </span>
-          <span className="text-xs text-emerald-400 font-mono">Zero Silent Drops</span>
         </div>
         <div className="mt-3 pt-2.5 border-t border-zinc-900 text-[11px] text-zinc-500 leading-tight">
-          All high-criticality detections strictly preserved at CRITICAL/HIGH regardless of adversary prompts.
+          Observed guardrail metric across evaluated cases.
         </div>
       </div>
     </div>

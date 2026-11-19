@@ -3,10 +3,11 @@ import { CheckCircle2, XCircle, ArrowUpRight } from 'lucide-react';
 import type { BenchmarkComparativeScorecard } from '../../types/sentrax';
 
 interface ComparativeMetricsTableProps {
+  inconclusive: boolean;
   metrics: BenchmarkComparativeScorecard[];
 }
 
-export const ComparativeMetricsTable: React.FC<ComparativeMetricsTableProps> = ({ metrics }) => {
+export const ComparativeMetricsTable: React.FC<ComparativeMetricsTableProps> = ({ metrics, inconclusive }) => {
   return (
     <div className="bg-zinc-950 border border-zinc-800 rounded-xl overflow-hidden">
       <div className="p-4 border-b border-zinc-800/80 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
@@ -56,7 +57,9 @@ export const ComparativeMetricsTable: React.FC<ComparativeMetricsTableProps> = (
                   </div>
                 </td>
                 <td className="py-3.5 px-4 text-right">
-                  {item.is_target_met ? (
+                  {inconclusive ? (
+                    <span className="text-zinc-400">Inconclusive</span>
+                  ) : item.is_target_met ? (
                     <span className="inline-flex items-center gap-1 text-[11px] font-mono px-2 py-0.5 rounded-full bg-emerald-950/50 border border-emerald-800/60 text-emerald-300">
                       <CheckCircle2 className="size-3" />
                       Target Met

@@ -141,7 +141,7 @@ def run_all_api_tests():
     assert retry_res.status_code == 200, f"RETRY_AI failed: {retry_res.text}"
     assert retry_res.json()["action_taken"] == "RETRY_AI"
     retry_detail = client.get(f"/api/v1/alerts/{retry_alert_id}").json()
-    assert retry_detail["alert"]["status"] in ("PENDING_REVIEW", "AWAITING_ANALYST", "NEEDS_MANUAL_TRIAGE")
+    assert retry_detail["alert"]["status"] == "PENDING_REVIEW"
     print(f"✅ PASS: [POST /api/v1/alerts/.../decision] RETRY_AI succeeded (Status: {retry_detail['alert']['status']})")
 
     # 10. Analytics KPI Summary
@@ -186,21 +186,18 @@ def run_all_api_tests():
     assert len(suite_res.json()) == 30
     print(f"✅ PASS: [GET /api/v1/evaluation/suite] Loaded complete 30-payload adversarial test suite")
 
-    # 16. Benchmark Evaluation Report
-    report_res = client.get("/api/v1/evaluation/report")
-    assert report_res.status_code == 200
-    report = report_res.json()
-    assert report["sentrax_bypass_rate"] == 0.0
-    assert report["nfr3_target_achieved"] is True
-    print(f"✅ PASS: [GET /api/v1/evaluation/report] Verified 0% prompt-injection bypass target met")
-
-    # 16b. Benchmark Evaluation Run (POST /run)
+    # 16. Benchmark Evaluation Run (POST /run)
     run_res = client.post("/api/v1/evaluation/run?mode=full")
     assert run_res.status_code == 200
     run_report = run_res.json()
     assert run_report["sentrax_bypass_rate"] == 0.0
+    assert run_report["nfr3_target_achieved"] is True
     assert len(run_report["adversarial_suite"]) == 30
     print(f"✅ PASS: [POST /api/v1/evaluation/run] Executed adversarial evaluation run dynamically")
+
+    report_res = client.get("/api/v1/evaluation/report")
+    assert report_res.status_code == 200
+    assert report_res.json()["run_id"] == run_report["run_id"]
 
     # 16c. Benchmark Export Formats (Markdown & CSV per AC-18)
     md_res = client.get("/api/v1/evaluation/export-md")

@@ -17,12 +17,13 @@ from .ingestion.sources import IndexerSource
 from .ingestion.wazuh_settings import get_wazuh_settings
 from .ingestion.webhook import router as webhook_router
 from .routers import admin, alerts, analytics, auth, evaluation, governance
+from .worker.triage_worker import start_worker, stop_worker
 
 logger = logging.getLogger("sentrax.api")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Start the Wazuh poller only when WAZUH_INGEST_MODE=poll (Part 4)."""
+    """Run the triage worker and the optional Wazuh poller with the API."""
     w = get_wazuh_settings()
     poller = None
     if w.WAZUH_INGEST_MODE == "poll":
@@ -31,10 +32,17 @@ async def lifespan(app: FastAPI):
                           w.WAZUH_INDEXER_PASSWORD, w.WAZUH_VERIFY_TLS),
             get_session_factory(), w.WAZUH_POLL_INTERVAL_SECONDS, w.WAZUH_MIN_LEVEL,
         )
-        poller.start()
-    yield
-    if poller:
-        poller.stop()
+    try:
+        start_worker()
+        if poller:
+            poller.start()
+        yield
+    finally:
+        try:
+            if poller:
+                poller.stop()
+        finally:
+            stop_worker()
 
 
 app = FastAPI(

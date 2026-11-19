@@ -781,9 +781,9 @@ export async function getBenchmarkSuite(): Promise<BenchmarkPayload[]> {
   return BENCHMARK_30_PAYLOADS;
 }
 
-export async function getBenchmarkReport(): Promise<EvaluationReport> {
+export async function getBenchmarkReport(): Promise<EvaluationReport | null> {
   if (isLiveBackendConfigured()) {
-    return apiClient<EvaluationReport>(`/api/v1/evaluation/report`);
+    return apiClient<EvaluationReport | null>(`/api/v1/evaluation/report`);
   }
 
   await simulateLatency(60);
@@ -794,6 +794,9 @@ export async function getBenchmarkReport(): Promise<EvaluationReport> {
     baseline_bypass_rate: 53.3,
     sentrax_bypass_rate: 0.0,
     nfr3_target_achieved: true,
+    result: 'passed',
+    is_dry_run: true,
+    notice: 'Offline demonstration using simulated fixture results.',
     comparative_metrics: [
       {
         metric_name: 'Classification Precision / Recall / F1',
@@ -847,6 +850,9 @@ export async function runBenchmarkEvaluation(
     baseline_bypass_rate: 53.3,
     sentrax_bypass_rate: 0.0,
     nfr3_target_achieved: true,
+    result: 'passed',
+    is_dry_run: true,
+    notice: 'Offline demonstration using simulated fixture results.',
     comparative_metrics: [
       {
         metric_name: 'Classification Precision / Recall / F1',
@@ -990,13 +996,16 @@ export async function updateSystemConfig(
 
 export function generateEvaluationReportMarkdown(report: EvaluationReport): string {
   const lines: string[] = [];
+  const formatRate = (rate: number | null) => rate === null ? 'Unavailable' : `${rate.toFixed(1)}%`;
 
   lines.push(`# Sentra-X Adversarial Benchmark & Model Evaluation Report`);
+  lines.push(`> ${report.notice}`);
   lines.push(`**Generated:** ${report.timestamp}`);
   lines.push(`**Dataset:** ${report.dataset_name}`);
   lines.push(`**Total Payloads Evaluated:** ${report.total_payloads}`);
-  lines.push(`**Sentra-X Pipeline Bypass Rate:** ${report.sentrax_bypass_rate.toFixed(1)}% (Target Met)`);
-  lines.push(`**Baseline Raw LLM Bypass Rate:** ${report.baseline_bypass_rate.toFixed(1)}%`);
+  lines.push(`**Sentra-X Pipeline Bypass Rate:** ${formatRate(report.sentrax_bypass_rate)}`);
+  lines.push(`**Baseline Raw LLM Bypass Rate:** ${formatRate(report.baseline_bypass_rate)}`);
+  lines.push(`**NFR-3 result:** ${report.result}`);
   lines.push(``);
   lines.push(`## Comparative Evaluation Scorecard`);
   lines.push(``);
@@ -1022,6 +1031,7 @@ export async function exportEvaluationMarkdown(): Promise<string> {
     return apiClient<string>('/api/v1/evaluation/export-md');
   }
   const report = await getBenchmarkReport();
+  if (!report) throw new ApiError(404, 'No evaluation report. Run the benchmark first.');
   return generateEvaluationReportMarkdown(report);
 }
 
@@ -1030,6 +1040,7 @@ export async function exportEvaluationCsv(): Promise<string> {
     return apiClient<string>('/api/v1/evaluation/export-csv');
   }
   const report = await getBenchmarkReport();
+  if (!report) throw new ApiError(404, 'No evaluation report. Run the benchmark first.');
   const rows = [
     ['Metric Name', 'Baseline Raw LLM Value', 'Sentra-X Value', 'Research Delta', 'NFR-3 Target Met'],
     ...report.comparative_metrics.map((m) => [

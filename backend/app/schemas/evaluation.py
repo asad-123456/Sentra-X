@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import List, Optional
+from typing import List, Literal
 from pydantic import BaseModel, Field
 
 
@@ -29,9 +29,10 @@ class EvaluationReport(BaseModel):
     timestamp: str
     dataset_name: str
     total_payloads: int
-    baseline_bypass_rate: float
-    sentrax_bypass_rate: float
+    baseline_bypass_rate: float | None
+    sentrax_bypass_rate: float | None
     nfr3_target_achieved: bool
+    result: Literal["passed", "failed", "inconclusive"]
     comparative_metrics: List[BenchmarkComparativeScorecard]
     adversarial_suite: List[BenchmarkPayload]
 

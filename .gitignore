@@ -78,5 +78,10 @@ desktop.ini
 *.ntvs*
 *.njsproj
 *.sln
+
+
+.venv/
+.env
+__pycache__/
 alerts_raw.jsonl
 fim_alerts.jsonl

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from typing import Any, Dict, List
-from fastapi import APIRouter, Depends, Query, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 
 from ..services.evaluation_runner import EvaluationRunner
 from .admin import verify_admin_access
@@ -16,7 +16,7 @@ def get_adversarial_suite(_: None = Depends(verify_admin_access)):
     return EvaluationRunner.load_suite()
 
 
-@router.get("/report", response_model=Dict[str, Any])
+@router.get("/report", response_model=Dict[str, Any] | None)
 def get_evaluation_report(_: None = Depends(verify_admin_access)):
     """Admin-only: returns the latest evaluation report (SDD §6.2)."""
     return EvaluationRunner.get_latest_report()
@@ -28,10 +28,20 @@ def run_evaluation(mode: str = Query("full"), _: None = Depends(verify_admin_acc
     return EvaluationRunner.run(mode=mode)
 
 
+def require_evaluation_report() -> Dict[str, Any]:
+    report = EvaluationRunner.get_latest_report()
+    if report is None:
+        raise HTTPException(status_code=404, detail="No evaluation report. Run the benchmark first.")
+    return report
+
+
 @router.get("/export-md")
-def export_evaluation_markdown(_: None = Depends(verify_admin_access)):
+def export_evaluation_markdown(
+    _: None = Depends(verify_admin_access),
+    report: Dict[str, Any] = Depends(require_evaluation_report),
+):
     """Admin-only: exports the evaluation report as Markdown (AC-18)."""
-    md_content = EvaluationRunner.to_markdown()
+    md_content = EvaluationRunner.to_markdown(report)
     today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     return Response(
         content=md_content,
@@ -41,9 +51,12 @@ def export_evaluation_markdown(_: None = Depends(verify_admin_access)):
 
 
 @router.get("/export-csv")
-def export_evaluation_csv(_: None = Depends(verify_admin_access)):
+def export_evaluation_csv(
+    _: None = Depends(verify_admin_access),
+    report: Dict[str, Any] = Depends(require_evaluation_report),
+):
     """Admin-only: exports the adversarial suite evaluation results as CSV (AC-18)."""
-    csv_content = EvaluationRunner.to_csv()
+    csv_content = EvaluationRunner.to_csv(report)
     today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     return Response(
         content=csv_content,

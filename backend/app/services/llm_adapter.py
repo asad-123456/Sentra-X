@@ -18,6 +18,8 @@ import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Any, Callable, Literal, Sequence, get_args
+from uuid import UUID
+import threading
 
 from dotenv import load_dotenv
 from pydantic import ValidationError
@@ -33,7 +35,7 @@ MAX_RETRIES = 3
 BACKOFF_SECONDS = (1.0, 2.0, 4.0)
 MAX_RATIONALE_CHARS = 500
 DEFAULT_GEMINI_MODEL = "gemini-3.1-flash-lite"
-DEFAULT_CLAUDE_MODEL = "claude-3-5-haiku-20241022"
+DEFAULT_CLAUDE_MODEL = "claude-haiku-5-5"
 
 
 # --- errors -----------------------------------------------------------------
@@ -70,7 +72,7 @@ class LLMHTTPError(LLMCallError):
 class InjectedExemplar:
     """One FR-4 exemplar as it reaches the prompt builder (Atta's lookup returns these)."""
 
-    id: int | str
+    id: int | str | UUID
     match_tier: Literal["Tier 1", "Tier 2"]
     rule_id: str
     process_signature: str | None
@@ -180,6 +182,7 @@ def parse_llm_output(raw: str) -> LLMTriageOutput:
 # --- adapters ---------------------------------------------------------------
 class LLMAdapter(ABC):
     model_name: str
+    provider_name: str
 
     @abstractmethod
     def generate(self, system_prompt: str, user_prompt: str, timeout_s: float) -> str:
@@ -201,7 +204,15 @@ def _extract_pack(user_prompt: str) -> dict:
                 return json.loads(lines[i + 1])
             except json.JSONDecodeError:
                 return {}
-    return {}
+    # FR-10 baseline mode sends the raw Wazuh alert as plain JSON, with no envelope.
+    try:
+        raw = json.loads(user_prompt)
+    except json.JSONDecodeError:
+        return {}
+    if not isinstance(raw, dict) or not isinstance(raw.get("rule"), dict):
+        return {}
+    telemetry = {k: raw[k] for k in ("full_log", "data") if raw.get(k)}
+    return {"alert_metadata": {"rule": raw["rule"]}, "telemetry_payload": telemetry}
 
 
 class MockAdapter(LLMAdapter):
@@ -212,18 +223,21 @@ class MockAdapter(LLMAdapter):
     """
 
     model_name = "mock"
+    provider_name = "mock"
 
     def __init__(
         self,
         failure_mode: str | None = None,
         fail_times: int | None = None,
         gullible: bool = False,
+        abstain_on_empty: bool = False,
     ):
         if failure_mode is not None and failure_mode not in MOCK_FAILURE_MODES:
             raise ValueError(f"Unknown mock failure mode: {failure_mode}")
         self.failure_mode = failure_mode
         self.fail_times = fail_times
         self.gullible = gullible
+        self.abstain_on_empty = abstain_on_empty
         self.calls = 0
 
     def generate(self, system_prompt: str, user_prompt: str, timeout_s: float) -> str:
@@ -244,6 +258,14 @@ class MockAdapter(LLMAdapter):
         rule = pack.get("alert_metadata", {}).get("rule", {})
         level = rule.get("level", 0)
         level = level if isinstance(level, int) else 0
+        if self.abstain_on_empty and not pack.get("telemetry_payload"):
+            return {
+                "verdict": "NEEDS_ANALYST_REVIEW",
+                "recommended_severity": "MEDIUM",
+                "confidence_score": 0.40,
+                "cited_evidence_keys": ["alert_metadata.rule.id"],
+                "explanation": "Mock model: the alert has no telemetry, so the evidence is insufficient.",
+            }
         keys = ["alert_metadata.rule.id", "alert_metadata.rule.level"]
         if "full_log" in pack.get("telemetry_payload", {}):
             keys.append("telemetry_payload.full_log")
@@ -298,6 +320,8 @@ CLAUDE_TOOL_SCHEMA = LLMTriageOutput.model_json_schema()
 
 
 class GeminiAdapter(LLMAdapter):
+    provider_name = "gemini"
+
     def __init__(self, api_key: str, model: str = DEFAULT_GEMINI_MODEL):
         from google import genai
         from google.genai import types
@@ -325,10 +349,7 @@ class GeminiAdapter(LLMAdapter):
             if translated is None:
                 raise
             raise translated from exc
-        try:
-            text = response.text
-        except Exception as exc:
-            raise LLMSchemaError(f"failed to read Gemini response text (safety filter block): {exc}") from exc
+        text = response.text
         if not text:
             raise LLMSchemaError("empty response (possibly blocked by a safety filter)")
         return text
@@ -348,6 +369,8 @@ def _translate_gemini_error(exc: Exception) -> LLMCallError | None:
 
 
 class ClaudeAdapter(LLMAdapter):
+    provider_name = "claude"
+
     def __init__(self, api_key: str, model: str = DEFAULT_CLAUDE_MODEL):
         import anthropic
 
@@ -362,7 +385,6 @@ class ClaudeAdapter(LLMAdapter):
             response = self._client.messages.create(
                 model=self.model_name,
                 max_tokens=1024,
-                temperature=0.0,
                 system=system_prompt,
                 messages=[{"role": "user", "content": user_prompt}],
                 tools=[
@@ -393,8 +415,29 @@ def _int_env(name: str) -> int | None:
     return int(value) if value else None
 
 
-def get_adapter(provider: str | None = None) -> LLMAdapter:
-    """Build the adapter named by LLM_PROVIDER (mock | gemini | claude)."""
+_ADAPTER_CACHE: dict[tuple, LLMAdapter] = {}
+_ADAPTER_LOCK = threading.Lock()
+
+
+def clear_adapter_cache() -> None:
+    with _ADAPTER_LOCK:
+        _ADAPTER_CACHE.clear()
+
+
+def _cached(cache_key: tuple, build: Callable[[], LLMAdapter]) -> LLMAdapter:
+    with _ADAPTER_LOCK:
+        adapter = _ADAPTER_CACHE.get(cache_key)
+        if adapter is None:
+            adapter = build()
+            _ADAPTER_CACHE[cache_key] = adapter
+        return adapter
+
+
+def get_adapter(provider: str | None = None, model: str | None = None) -> LLMAdapter:
+    """Build the adapter named by LLM_PROVIDER (mock | gemini | claude).
+
+    Real adapters are cached per (provider, key, model). The mock is cheap and
+    stateful, so every call returns a fresh one."""
     load_dotenv(override=False)
     name = (provider or os.getenv("LLM_PROVIDER") or "mock").strip().lower()
 
@@ -405,17 +448,17 @@ def get_adapter(provider: str | None = None) -> LLMAdapter:
             gullible=os.getenv("MOCK_GULLIBLE", "").strip().lower() in ("1", "true", "yes"),
         )
     if name == "gemini":
-        from app.config import settings
-        key = (settings.GEMINI_API_KEY or os.getenv("GEMINI_API_KEY", "")).strip()
+        key = os.getenv("GEMINI_API_KEY", "").strip()
         if not key:
             raise ValueError("GEMINI_API_KEY is not set")
-        return GeminiAdapter(key, os.getenv("GEMINI_MODEL") or DEFAULT_GEMINI_MODEL)
+        model = model or os.getenv("GEMINI_MODEL") or DEFAULT_GEMINI_MODEL
+        return _cached(("gemini", key, model), lambda: GeminiAdapter(key, model))
     if name in ("claude", "anthropic"):
-        from app.config import settings
-        key = (settings.ANTHROPIC_API_KEY or os.getenv("ANTHROPIC_API_KEY", "")).strip()
+        key = os.getenv("ANTHROPIC_API_KEY", "").strip()
         if not key:
             raise ValueError("ANTHROPIC_API_KEY is not set")
-        return ClaudeAdapter(key, os.getenv("ANTHROPIC_MODEL") or DEFAULT_CLAUDE_MODEL)
+        model = model or os.getenv("ANTHROPIC_MODEL") or DEFAULT_CLAUDE_MODEL
+        return _cached(("claude", key, model), lambda: ClaudeAdapter(key, model))
     raise ValueError(f"Unknown LLM_PROVIDER: {name!r} (use mock, gemini or claude)")
 
 

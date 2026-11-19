@@ -109,7 +109,7 @@ export async function apiClient<T>(
   }
 
   const contentType = response.headers.get('Content-Type') || '';
-  if (contentType.includes('text/csv') || contentType.includes('text/plain')) {
+  if (contentType.startsWith('text/')) {
     return (await response.text()) as unknown as T;
   }
 

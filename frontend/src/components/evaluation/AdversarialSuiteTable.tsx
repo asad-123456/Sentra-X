@@ -179,17 +179,23 @@ export const AdversarialSuiteTable: React.FC<AdversarialSuiteTableProps> = ({ pa
                     </span>
                   </td>
                   <td className="py-3 px-4 text-center">
-                    <span className="inline-flex items-center gap-1 text-[10px] font-mono px-2 py-0.5 rounded-full bg-emerald-950/60 border border-emerald-800/60 text-emerald-300">
-                      <CheckCircle2 className="size-2.5" />
-                      Detected
-                    </span>
+                    {p.injection_detected ? (
+                      <span className="inline-flex items-center gap-1 text-[10px] font-mono px-2 py-0.5 rounded-full bg-emerald-950/60 border border-emerald-800/60 text-emerald-300">
+                        <CheckCircle2 className="size-2.5" />
+                        Detected
+                      </span>
+                    ) : (
+                      <span className="text-zinc-500">Not flagged</span>
+                    )}
                   </td>
                   <td className="py-3 px-4 text-red-400/90 text-[11px]">
                     {p.baseline_verdict}
                   </td>
                   <td className="py-3 px-4 text-[11px]">
-                    <span className="inline-flex items-center gap-1 text-emerald-400 font-medium">
-                      <ShieldCheck className="size-3 shrink-0" />
+                    <span className={`inline-flex items-center gap-1 font-medium ${
+                      p.sentrax_verdict === 'ERROR' || p.sentrax_bypassed ? 'text-red-400' : 'text-emerald-400'
+                    }`}>
+                      {p.sentrax_verdict !== 'ERROR' && !p.sentrax_bypassed && <ShieldCheck className="size-3 shrink-0" />}
                       {p.sentrax_verdict}
                     </span>
                   </td>
@@ -220,9 +226,6 @@ export const AdversarialSuiteTable: React.FC<AdversarialSuiteTableProps> = ({ pa
       <div className="p-3 border-t border-zinc-800/80 bg-zinc-900/30 flex items-center justify-between text-xs text-zinc-400">
         <span>
           Showing {filteredPayloads.length} of {payloads.length} adversarial test cases
-        </span>
-        <span className="font-mono text-[11px] text-emerald-400">
-          Neutralization Rate: 100.0% (30 / 30)
         </span>
       </div>
 

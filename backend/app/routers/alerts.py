@@ -21,6 +21,7 @@ from ..models.exemplar import FeedbackExemplar
 from ..models.user import User
 from ..schemas.queue import PaginatedQueueResponse
 from ..utils import parse_uuid
+from ..worker.jobs import enqueue_triage
 
 router = APIRouter(prefix="/alerts", tags=["Alerts & Triage Queue"])
 
@@ -489,43 +490,6 @@ def submit_alert_decision(
         alert.retry_count = 0
         if ai:
             ai.retry_count = 0
-        try:
-            from ..worker.jobs import enqueue_triage
-            enqueue_triage(alert.id)
-        except Exception:
-            pass
-            # Re-evaluate guardrails deterministically (rules engine)
-            try:
-                from ..services.rules_engine import apply_guardrails
-                from ..services.triage_schema import LLMTriageOutput
-
-                ep = db.query(EvidencePack).filter(EvidencePack.alert_id == alert.id).first()
-                valid_keys = ep.valid_dot_keys if ep and ep.valid_dot_keys else []
-                injection = ep.injection_suspect if ep else False
-                llm_repr = LLMTriageOutput(
-                    verdict=ai.raw_verdict if ai.raw_verdict in ("TRUE_POSITIVE", "FALSE_POSITIVE", "NEEDS_ANALYST_REVIEW") else "TRUE_POSITIVE",
-                    recommended_severity=ai.raw_severity if ai.raw_severity in ("LOW", "MEDIUM", "HIGH", "CRITICAL") else "HIGH",
-                    confidence_score=ai.confidence_score if ai.confidence_score is not None else 0.85,
-                    cited_evidence_keys=ai.cited_evidence_keys if isinstance(ai.cited_evidence_keys, list) else [],
-                    explanation=(ai.explanation or "Re-evaluated via RETRY_AI trigger.")[:500],
-                )
-                gr = apply_guardrails(
-                    rule_level=alert.rule_level,
-                    llm=llm_repr,
-                    valid_dot_keys=valid_keys,
-                    injection_suspect=injection,
-                )
-                ai.effective_verdict = gr.effective_verdict
-                ai.effective_severity = gr.effective_severity
-                ai.safety_floor_triggered = gr.safety_floor_triggered
-                ai.abstention_triggered = gr.abstention_triggered
-                ai.guardrail_audit_note = gr.guardrail_audit_note
-                if gr.abstention_triggered:
-                    alert.status = "NEEDS_MANUAL_TRIAGE"
-                else:
-                    alert.status = "AWAITING_ANALYST"
-            except Exception:
-                pass  # Non-blocking if executing in decoupled worker mode
 
     alert.updated_at = datetime.now(timezone.utc)
 
@@ -587,6 +551,8 @@ def submit_alert_decision(
     db.add(audit_record)
 
     db.commit()
+    if action == "RETRY_AI":
+        enqueue_triage(target_uuid)
     db.refresh(audit_record)  # BUG-N3 fix: populate server-generated created_at before serializing
 
     return {
