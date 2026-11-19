@@ -204,7 +204,15 @@ def _extract_pack(user_prompt: str) -> dict:
                 return json.loads(lines[i + 1])
             except json.JSONDecodeError:
                 return {}
-    return {}
+    # FR-10 baseline mode sends the raw Wazuh alert as plain JSON, with no envelope.
+    try:
+        raw = json.loads(user_prompt)
+    except json.JSONDecodeError:
+        return {}
+    if not isinstance(raw, dict) or not isinstance(raw.get("rule"), dict):
+        return {}
+    telemetry = {k: raw[k] for k in ("full_log", "data") if raw.get(k)}
+    return {"alert_metadata": {"rule": raw["rule"]}, "telemetry_payload": telemetry}
 
 
 class MockAdapter(LLMAdapter):
@@ -222,12 +230,14 @@ class MockAdapter(LLMAdapter):
         failure_mode: str | None = None,
         fail_times: int | None = None,
         gullible: bool = False,
+        abstain_on_empty: bool = False,
     ):
         if failure_mode is not None and failure_mode not in MOCK_FAILURE_MODES:
             raise ValueError(f"Unknown mock failure mode: {failure_mode}")
         self.failure_mode = failure_mode
         self.fail_times = fail_times
         self.gullible = gullible
+        self.abstain_on_empty = abstain_on_empty
         self.calls = 0
 
     def generate(self, system_prompt: str, user_prompt: str, timeout_s: float) -> str:
@@ -248,6 +258,14 @@ class MockAdapter(LLMAdapter):
         rule = pack.get("alert_metadata", {}).get("rule", {})
         level = rule.get("level", 0)
         level = level if isinstance(level, int) else 0
+        if self.abstain_on_empty and not pack.get("telemetry_payload"):
+            return {
+                "verdict": "NEEDS_ANALYST_REVIEW",
+                "recommended_severity": "MEDIUM",
+                "confidence_score": 0.40,
+                "cited_evidence_keys": ["alert_metadata.rule.id"],
+                "explanation": "Mock model: the alert has no telemetry, so the evidence is insufficient.",
+            }
         keys = ["alert_metadata.rule.id", "alert_metadata.rule.level"]
         if "full_log" in pack.get("telemetry_payload", {}):
             keys.append("telemetry_payload.full_log")

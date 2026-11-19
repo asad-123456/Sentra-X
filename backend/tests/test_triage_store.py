@@ -1,7 +1,7 @@
 """Integration tests for triage_store against a real PostgreSQL 16 (Part 6A-2).
 
 Needs a migrated test database. Defaults to the throwaway container:
-    postgresql+psycopg://sentrax:sentrax@localhost:5432/sentrax_test
+        "TEST_DATABASE_URL", "postgresql+psycopg://sentrax:sentrax@localhost:5432/sentrax_triage_test"
 Override with TEST_DATABASE_URL (the database name must end in _test).
 Every test runs inside a transaction that is rolled back, so nothing is left behind.
 """
@@ -21,7 +21,7 @@ from app.services.triage_pipeline import run_triage_pipeline
 from app.services.triage_store import load_triage_inputs, persist_outcome
 
 TEST_DB_URL = os.getenv(
-    "TEST_DATABASE_URL", "postgresql+psycopg://sentrax:sentrax@localhost:5432/sentrax_test"
+    "TEST_DATABASE_URL", "postgresql+psycopg://sentrax:sentrax@localhost:5432/sentrax_triage_test"
 )
 REF = datetime(2026, 11, 17, 12, 0, tzinfo=timezone.utc)
 LOG = {"full_log": "Failed password for root from 203.0.113.9 port 4242 ssh2"}

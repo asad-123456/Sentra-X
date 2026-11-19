@@ -141,7 +141,7 @@ def run_all_api_tests():
     assert retry_res.status_code == 200, f"RETRY_AI failed: {retry_res.text}"
     assert retry_res.json()["action_taken"] == "RETRY_AI"
     retry_detail = client.get(f"/api/v1/alerts/{retry_alert_id}").json()
-    assert retry_detail["alert"]["status"] in ("AWAITING_ANALYST", "NEEDS_MANUAL_TRIAGE")
+    assert retry_detail["alert"]["status"] == "PENDING_REVIEW"
     print(f"✅ PASS: [POST /api/v1/alerts/.../decision] RETRY_AI succeeded (Status: {retry_detail['alert']['status']})")
 
     # 10. Analytics KPI Summary
