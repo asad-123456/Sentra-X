@@ -79,8 +79,8 @@ def persist_alerts(session: Session, parsed: list[ParsedAlert]) -> tuple[list[uu
             continue
         if a.needs_manual_triage:
             manual.append(alert_id)
-            log.warning("alert %s has unusable rule.level %r; stored as level %d, NEEDS_MANUAL_TRIAGE",
-                        a.wazuh_alert_id, (a.raw_payload.get("rule") or {}).get("level"), a.rule_level)
+            log.warning("ingest_manual_triage alert_id=%s reason=invalid_rule_level stored_level=%d",
+                        alert_id, a.rule_level)
         else:
             queued.append(alert_id)
     return queued, manual, assets_new

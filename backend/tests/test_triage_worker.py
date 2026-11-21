@@ -77,11 +77,14 @@ def test_a_pending_alert_is_triaged(factory, new_alert):
     assert row(factory, alert_id) == ("AWAITING_ANALYST", 0, 1, 1)
 
 
-def test_an_adapter_failure_goes_to_manual_triage_and_keeps_the_pack(factory, new_alert):
+def test_an_adapter_failure_goes_to_manual_triage_and_keeps_the_pack(factory, new_alert, caplog):
     alert_id = new_alert()
     adapter = MockAdapter(failure_mode="http_400")      # not retried, so the test is fast
     assert process_alert(alert_id, adapter, session_factory=factory) == "NEEDS_MANUAL_TRIAGE"
     assert row(factory, alert_id) == ("NEEDS_MANUAL_TRIAGE", 0, 1, 0)
+    assert f"triage_fallback alert_id={alert_id} generation=0" in caplog.text
+    assert "reason=LLMHTTPError (HTTP 400)" in caplog.text
+    assert "mock error" not in caplog.text
 
 
 def test_a_decided_alert_is_left_alone(factory, new_alert):
@@ -101,15 +104,17 @@ def test_a_crash_sends_the_alert_to_manual_triage(factory, new_alert):
     assert row(factory, alert_id)[0] == "NEEDS_MANUAL_TRIAGE"
 
 
-def test_sweep_recovers_pending_alerts_while_queue_is_busy_without_duplicates(factory, new_alert):
+def test_sweep_recovers_pending_alerts_while_queue_is_busy_without_duplicates(factory, new_alert, caplog):
     pending, closed = new_alert(), new_alert(status="CLOSED")
     q = TriageQueue()
     fresh_job = uuid.uuid4()
     q.enqueue(fresh_job)
     worker = TriageWorker(MockAdapter(), workers=1, sweep_seconds=60,
                           session_factory=factory, work_queue=q)
-    assert worker.sweep_once() >= 1
-    assert worker.sweep_once() == 0
+    with caplog.at_level("INFO", logger="sentrax.ops.triage"):
+        assert worker.sweep_once() >= 1
+        assert worker.sweep_once() == 0
+    assert f"triage_sweep oldest_alert_id={pending} oldest_ingested_age_seconds=" in caplog.text
     queued = []
     while not q.empty():
         queued.append(q.get())

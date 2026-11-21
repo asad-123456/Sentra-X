@@ -202,8 +202,8 @@ def _load_exemplars(
                 asset_criticality=tier or DEFAULT_CRITICALITY,
             )
         items = [e for e in map(_to_exemplar, raw or ()) if e is not None]
-    except Exception:
-        logger.exception("Exemplar lookup failed; continuing without exemplars")
+    except Exception as exc:
+        logger.warning("exemplar_lookup_failed error_type=%s", type(exc).__name__)
         return []
     return items[:MAX_EXEMPLARS]
 

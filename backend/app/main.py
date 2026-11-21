@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from typing import Literal
 
-from fastapi import Depends, FastAPI, Request, status
+from fastapi import Depends, FastAPI, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
@@ -31,6 +31,12 @@ logger = logging.getLogger("sentrax.api")
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Run the triage worker and the optional Wazuh poller with the API."""
+    operations = logging.getLogger("sentrax.ops")
+    operations.setLevel(logging.INFO)
+    if not operations.hasHandlers():
+        handler = logging.StreamHandler()
+        handler.setFormatter(logging.Formatter("%(levelname)s %(name)s %(message)s"))
+        operations.addHandler(handler)
     w = get_wazuh_settings()
     poller = None
     if w.WAZUH_INGEST_MODE == "poll":
@@ -62,7 +68,8 @@ app = FastAPI(
 
 @app.exception_handler(SQLAlchemyError)
 async def sqlalchemy_exception_handler(request: Request, exc: SQLAlchemyError):
-    logger.error("Unhandled database error during %s %s: %s", request.method, request.url.path, str(exc))
+    path = getattr(request.scope.get("route"), "path", "unknown")
+    logger.error("database_request_failed method=%s route=%s error_type=%s", request.method, path, type(exc).__name__)
     return JSONResponse(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         content={"detail": "Internal database error. The database transaction was rolled back."},
@@ -146,22 +153,19 @@ def get_runtime_settings(request: Request) -> RuntimeSettings:
     )
 
 
-@app.get("/api/health")
-def health_check():
-    db_status = "CONNECTED"
-    db_engine = "PostgreSQL"
+@app.get("/api/live")
+async def liveness_check():
+    return {"status": "ALIVE"}
+
+
+@app.get("/api/health", deprecated=True, responses={503: {"description": "Database unavailable"}})
+@app.get("/api/ready", responses={503: {"description": "Database unavailable"}})
+def health_check(response: Response):
     try:
         with sync_engine.connect() as conn:
-            raw_ver = conn.execute(text("SELECT version()")).scalar()
-            if raw_ver:
-                db_engine = raw_ver.split(",")[0].strip()
-    except Exception as exc:
-        db_status = f"DISCONNECTED: {exc}"
-
-    is_healthy = db_status == "CONNECTED"
-    return {
-        "status": "HEALTHY" if is_healthy else "DEGRADED",
-        "database": db_status,
-        "engine": db_engine,
-    }
+            conn.execute(text("SELECT 1"))
+    except SQLAlchemyError:
+        response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+        return {"status": "DEGRADED", "database": "DISCONNECTED", "engine": "PostgreSQL"}
+    return {"status": "HEALTHY", "database": "CONNECTED", "engine": "PostgreSQL"}
 

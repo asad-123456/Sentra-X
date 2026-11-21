@@ -8,7 +8,6 @@ Three phases keep database connections out of the slow LLM call:
 run_triage_pipeline never raises. Every failure becomes
 next_status = NEEDS_MANUAL_TRIAGE. This module never produces CLOSED or ESCALATED.
 """
-import logging
 from dataclasses import dataclass
 from typing import Any, Sequence
 
@@ -30,8 +29,6 @@ from app.services.rules_engine import (
     apply_guardrails,
     baseline_severity,
 )
-
-logger = logging.getLogger(__name__)
 
 STATUS_AWAITING_ANALYST = "AWAITING_ANALYST"
 STATUS_NEEDS_MANUAL_TRIAGE = "NEEDS_MANUAL_TRIAGE"
@@ -91,7 +88,6 @@ def run_triage_pipeline(
             [e.id for e in inputs.exemplars],  # same order the prompt uses
         )
     except Exception as exc:
-        logger.exception("Evidence pack assembly failed")
         error = f"evidence pack assembly failed: {type(exc).__name__}"
         return TriageOutcome(
             STATUS_NEEDS_MANUAL_TRIAGE, provider, None, _failed_call(adapter, error), None, error
@@ -100,8 +96,8 @@ def run_triage_pipeline(
     # Fail fast on an invalid rule level, before spending an LLM call.
     try:
         baseline_severity(inputs.alert.rule_level)
-    except ValueError as exc:
-        error = str(exc)
+    except ValueError:
+        error = "invalid rule level (expected 0-15)"
         return TriageOutcome(
             STATUS_NEEDS_MANUAL_TRIAGE, provider, ep, _failed_call(adapter, error), None, error
         )
@@ -121,8 +117,7 @@ def run_triage_pipeline(
             min_confidence,
         )
     except Exception as exc:
-        logger.exception("Guardrails failed")
-        error = f"guardrails failed: {type(exc).__name__}: {exc}"
+        error = f"guardrails failed: {type(exc).__name__}"
         return TriageOutcome(STATUS_NEEDS_MANUAL_TRIAGE, provider, ep, call, None, error)
 
     return TriageOutcome(STATUS_AWAITING_ANALYST, provider, ep, call, guardrails)

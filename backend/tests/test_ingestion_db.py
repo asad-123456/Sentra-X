@@ -142,9 +142,10 @@ def test_verify_signature_unit():
     assert not verify_signature("", body, sign("", body))
     assert not verify_signature("s", body, None)
     assert not verify_signature("s", body, "md5=abc")
+    assert not verify_signature("s", body, "sha256=é")
 
 
-def test_webhook_accepts_good_and_rejects_bad(factory, monkeypatch):
+def test_webhook_accepts_good_and_rejects_bad(factory, monkeypatch, caplog):
     monkeypatch.setattr("app.ingestion.webhook.get_wazuh_settings",
                         lambda: SimpleNamespace(WAZUH_WEBHOOK_SECRET="s3cret"))
     app.dependency_overrides[get_session_factory] = lambda: factory
@@ -157,6 +158,9 @@ def test_webhook_accepts_good_and_rejects_bad(factory, monkeypatch):
         bad = client.post("/api/webhooks/wazuh", content=body,
                           headers={"X-Sentrax-Signature": sign("wrong", body)})
         assert bad.status_code == 401
+        assert ok.headers["X-Request-ID"] != bad.headers["X-Request-ID"]
+        assert f"webhook_rejected request_id={bad.headers['X-Request-ID']} status=401 reason=invalid_signature" in caplog.text
+        assert sign("wrong", body) not in caplog.text
         assert client.post("/api/webhooks/wazuh", content=body).status_code == 401
         oversized = b" " * (MAX_WEBHOOK_BYTES + 1)
         assert client.post("/api/webhooks/wazuh", content=oversized).status_code == 413
