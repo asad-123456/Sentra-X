@@ -26,7 +26,6 @@ from typing import Any, Dict, List, Optional
 
 from app.services.evidence_assembler import AlertRecord
 from app.services.llm_adapter import (
-    TIMEOUT_S,
     LLMAdapter,
     MockAdapter,
     get_adapter,
@@ -201,7 +200,7 @@ def _make_adapter() -> LLMAdapter:
 def _run_baseline(raw: dict, adapter: LLMAdapter) -> Dict[str, Any]:
     start = time.perf_counter()
     try:
-        out = parse_llm_output(adapter.generate(BASELINE_SYSTEM_PROMPT, json.dumps(raw), TIMEOUT_S))
+        out = parse_llm_output(adapter.generate(BASELINE_SYSTEM_PROMPT, json.dumps(raw), adapter.timeout_s))
         verdict, severity = out.verdict, out.recommended_severity
     except Exception as exc:  # a failed call is not a bypass
         logger.warning("Baseline call failed: %s", type(exc).__name__)

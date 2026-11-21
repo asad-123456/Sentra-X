@@ -11,7 +11,7 @@ BACKEND_ENV = Path(__file__).resolve().parents[2] / ".env"
 class WorkerSettings(BaseSettings):
     model_config = SettingsConfigDict(env_file=BACKEND_ENV, extra="ignore", case_sensitive=False)
 
-    LLM_PROVIDER: str = "mock"            # mock | gemini | claude
+    LLM_PROVIDER: str = "mock"            # mock | gemini | claude | ollama
     TRIAGE_ENABLED: bool = True
     TRIAGE_WORKERS: int = 32
     TRIAGE_SWEEP_SECONDS: float = Field(default=5.0, gt=0)
