@@ -16,7 +16,7 @@ Reuse the virtual environment if it is already set up. Copy the template only wh
 
 - Point `DATABASE_URL` (`postgresql+psycopg://`) and `DATABASE_URL_ASYNC` (`postgresql+psycopg_async://`) to the intended PostgreSQL database.
 - Set a unique `SECRET_KEY`. Generate one with `python -c "import secrets; print(secrets.token_hex(32))"`.
-- Use `LLM_PROVIDER=mock` for development. Gemini and Claude require their corresponding keys. Use `DEMO_MODE=true` only for isolated demonstrations or tests that need it.
+- Use `LLM_PROVIDER=mock` for routine development. Gemini and Claude require their corresponding keys. For local Ollama, see [Ollama triage](#ollama-triage). Use `DEMO_MODE=true` only for isolated demonstrations or tests that need it.
 - Compose uses `backend/.env` by default. The loopback lab below uses its own `.env.lab`. Compose supplies the backend database URLs, `LLM_PROVIDER`, and `SEED_DEMO_DATA`.
 
 Apply migrations to the intended database. Use the seed command only on a disposable demo database:
@@ -80,6 +80,20 @@ Enter and confirm a password at the hidden prompts. The command creates the firs
 The Wazuh [source guide](../docs/wazuh_alert_source.md) covers configuration, the webhook contract and replay. The API lifespan starts the worker by default. The worker and Wazuh settings read `backend/.env` and the process environment. Use one API process for the in-process triage queue. `TRIAGE_ENABLED=false` disables consumption. On startup and periodically, the worker scans PostgreSQL for pending alerts, including work submitted by the standalone replay CLI.
 
 For a smoke test, start with an empty or newly populated disposable database and the mock provider. Ingest a fresh qualifying alert and verify `AWAITING_ANALYST`, an evidence pack, and an assessment. To test restart recovery, ingest another fresh alert with the worker disabled, then enable it and restart the API. The pending alert should reach the same state.
+
+### Ollama triage
+
+Run Ollama with cloud features disabled on the same machine as Sentra-X and install the local model with `ollama pull qwen3.5:4b`. For Docker Desktop, add these values to the lab environment file passed both to Compose and to the backend via `SENTRAX_BACKEND_ENV_FILE`.
+
+```dotenv
+LLM_PROVIDER=ollama
+OLLAMA_BASE_URL=http://host.docker.internal:11434
+OLLAMA_MODEL=qwen3.5:4b
+OLLAMA_TIMEOUT_SECONDS=90
+TRIAGE_WORKERS=1
+```
+
+Use `http://127.0.0.1:11434` for a backend running directly on the host. Recreate the backend after changing its environment. The worker sends the existing sanitized evidence pack and any matching feedback exemplars to the local model. Sentra-X validates its structured reply, applies the triage rules, and sends unresolved provider failures to manual review. The Ollama timeout is per attempt and accommodates cold model loads. Keep the mock provider for routine tests.
 
 ## Testing and maintenance
 

@@ -2,6 +2,7 @@ import json
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
+import httpx
 import pytest
 
 from app.services.evidence_assembler import AlertRecord, assemble_evidence_pack
@@ -14,10 +15,12 @@ from app.services.llm_adapter import (
     ClaudeAdapter,
     GeminiAdapter,
     InjectedExemplar,
+    LLMConnectionError,
     LLMHTTPError,
     LLMSchemaError,
     LLMTimeoutError,
     MockAdapter,
+    OllamaAdapter,
     build_user_prompt,
     get_adapter,
     parse_llm_output,
@@ -391,3 +394,64 @@ def test_adapters_expose_provider_names(monkeypatch):
     assert MockAdapter().provider_name == "mock"
     assert get_adapter("gemini").provider_name == "gemini"
     assert get_adapter("claude").provider_name == "claude"
+
+
+def test_ollama_uses_local_schema_and_provider_timeout(monkeypatch):
+    monkeypatch.setenv("OLLAMA_BASE_URL", "http://host.docker.internal:11434/")
+    monkeypatch.setenv("OLLAMA_MODEL", "qwen3.5:4b")
+    monkeypatch.setenv("OLLAMA_TIMEOUT_SECONDS", "42")
+
+    def post(url, *, json, timeout, trust_env):
+        assert str(url) == "http://host.docker.internal:11434/api/chat"
+        assert json["model"] == "qwen3.5:4b"
+        assert json["format"] == LLMTriageOutput.model_json_schema()
+        assert json["stream"] is False and json["think"] is False
+        assert json["truncate"] is False and json["shift"] is False
+        assert json["messages"][0] == {"role": "system", "content": SYSTEM_PROMPT}
+        assert json["messages"][1]["role"] == "user"
+        assert timeout == 42 and trust_env is False
+        return httpx.Response(
+            200,
+            request=httpx.Request("POST", url),
+            json={"done": True, "message": {"content": GOOD}},
+        )
+
+    monkeypatch.setattr(httpx, "post", post)
+    adapter = get_adapter("ollama")
+    assert get_adapter("ollama") is adapter
+    result = triage_alert(make_ep(), adapter, max_retries=0)
+    assert result.output == LLMTriageOutput.model_validate_json(GOOD)
+
+
+@pytest.mark.parametrize("base_url, model, timeout", [
+    ("http://example.com:11434", "qwen3.5:4b", 90),
+    ("http://localhost:11434/api", "qwen3.5:4b", 90),
+    ("http://localhost:11434", "qwen:cloud", 90),
+    ("http://localhost:11434", "qwen3.5:4b", float("nan")),
+])
+def test_ollama_rejects_invalid_local_configuration(base_url, model, timeout):
+    with pytest.raises(ValueError, match="OLLAMA_"):
+        OllamaAdapter(base_url, model, timeout)
+
+
+@pytest.mark.parametrize("failure, error", [
+    ("timeout", LLMTimeoutError),
+    ("offline", LLMConnectionError),
+    ("http", LLMHTTPError),
+    ("invalid", LLMSchemaError),
+])
+def test_ollama_translates_failed_requests(monkeypatch, failure, error):
+    def post(url, **kwargs):
+        request = httpx.Request("POST", url)
+        if failure == "timeout":
+            raise httpx.ReadTimeout("timeout", request=request)
+        if failure == "offline":
+            raise httpx.ConnectError("offline", request=request)
+        if failure == "http":
+            return httpx.Response(404, request=request, text="private details")
+        return httpx.Response(200, request=request, json={"done": True, "message": {}})
+
+    monkeypatch.setattr(httpx, "post", post)
+    with pytest.raises(error) as exc_info:
+        OllamaAdapter("http://localhost:11434", "qwen3.5:4b", 90).generate("system", "user", 1)
+    assert "private details" not in str(exc_info.value)

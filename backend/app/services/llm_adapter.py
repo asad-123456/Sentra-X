@@ -1,4 +1,4 @@
-"""Gemini, Claude and mock LLM adapters plus retry logic (FR-2).
+"""Gemini, Claude, Ollama and mock LLM adapters plus retry logic (FR-2).
 
 One alert:
     build_user_prompt(...)  -> exemplars first, then the pack envelope
@@ -11,6 +11,7 @@ Prompts contain telemetry, so they are never logged.
 """
 import json
 import logging
+import math
 import os
 import re
 import secrets
@@ -21,6 +22,7 @@ from typing import Any, Callable, Literal, Sequence, get_args
 from uuid import UUID
 import threading
 
+import httpx
 from dotenv import load_dotenv
 from pydantic import ValidationError
 
@@ -36,6 +38,7 @@ BACKOFF_SECONDS = (1.0, 2.0, 4.0)
 MAX_RATIONALE_CHARS = 500
 DEFAULT_GEMINI_MODEL = "gemini-3.1-flash-lite"
 DEFAULT_CLAUDE_MODEL = "claude-haiku-5-5"
+DEFAULT_OLLAMA_MODEL = "qwen3.5:4b"
 
 
 # --- errors -----------------------------------------------------------------
@@ -183,6 +186,7 @@ def parse_llm_output(raw: str) -> LLMTriageOutput:
 class LLMAdapter(ABC):
     model_name: str
     provider_name: str
+    timeout_s: float = TIMEOUT_S
 
     @abstractmethod
     def generate(self, system_prompt: str, user_prompt: str, timeout_s: float) -> str:
@@ -356,7 +360,6 @@ class GeminiAdapter(LLMAdapter):
 
 
 def _translate_gemini_error(exc: Exception) -> LLMCallError | None:
-    import httpx
     from google.genai import errors
 
     if isinstance(exc, (httpx.TimeoutException, TimeoutError)):
@@ -409,6 +412,69 @@ class ClaudeAdapter(LLMAdapter):
         raise LLMSchemaError("no tool_use block in the response")
 
 
+class OllamaAdapter(LLMAdapter):
+    provider_name = "ollama"
+    _schema = LLMTriageOutput.model_json_schema()
+
+    def __init__(self, base_url: str, model: str, timeout_s: float):
+        url = httpx.URL(base_url)
+        if (
+            url.scheme != "http"
+            or url.host not in {"localhost", "127.0.0.1", "::1", "host.docker.internal"}
+            or url.path != "/"
+            or url.userinfo
+            or url.query
+            or url.fragment
+        ):
+            raise ValueError("OLLAMA_BASE_URL must be a local HTTP origin without credentials or a path")
+        if not re.fullmatch(r"[\w.-]+(?::[\w.-]+)?", model) or model.lower().endswith(
+            (":cloud", "-cloud")
+        ):
+            raise ValueError("OLLAMA_MODEL must name a local model, for example qwen3.5:4b")
+        if not math.isfinite(timeout_s) or timeout_s <= 0:
+            raise ValueError("OLLAMA_TIMEOUT_SECONDS must be finite and positive")
+
+        self._chat_url = url.copy_with(path="/api/chat")
+        self.model_name = model
+        self.timeout_s = timeout_s
+
+    def generate(self, system_prompt: str, user_prompt: str, timeout_s: float) -> str:
+        try:
+            response = httpx.post(
+                self._chat_url,
+                json={
+                    "model": self.model_name,
+                    "messages": [
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt},
+                    ],
+                    "format": self._schema,
+                    "stream": False,
+                    "think": False,
+                    "truncate": False,
+                    "shift": False,
+                    "options": {"temperature": 0, "num_ctx": 8192},
+                },
+                timeout=timeout_s,
+                trust_env=False,
+            )
+            response.raise_for_status()
+        except httpx.TimeoutException as exc:
+            raise LLMTimeoutError("Ollama request timed out") from exc
+        except httpx.RequestError as exc:
+            raise LLMConnectionError("Ollama request failed") from exc
+        except httpx.HTTPStatusError as exc:
+            raise LLMHTTPError(exc.response.status_code) from exc
+        try:
+            reply = response.json()
+            content = reply["message"]["content"]
+        except (ValueError, KeyError, TypeError) as exc:
+            raise LLMSchemaError("invalid Ollama chat response") from exc
+        if reply.get("done") is not True or not isinstance(content, str) or not content.strip():
+            raise LLMSchemaError("incomplete or empty Ollama chat response")
+        return content
+
+
 # --- factory ----------------------------------------------------------------
 def _int_env(name: str) -> int | None:
     value = os.getenv(name, "").strip()
@@ -434,9 +500,9 @@ def _cached(cache_key: tuple, build: Callable[[], LLMAdapter]) -> LLMAdapter:
 
 
 def get_adapter(provider: str | None = None, model: str | None = None) -> LLMAdapter:
-    """Build the adapter named by LLM_PROVIDER (mock | gemini | claude).
+    """Build the adapter named by LLM_PROVIDER (mock | gemini | claude | ollama).
 
-    Real adapters are cached per (provider, key, model). The mock is cheap and
+    Real adapters are cached by their configuration. The mock is cheap and
     stateful, so every call returns a fresh one."""
     load_dotenv(override=False)
     name = (provider or os.getenv("LLM_PROVIDER") or "mock").strip().lower()
@@ -459,7 +525,18 @@ def get_adapter(provider: str | None = None, model: str | None = None) -> LLMAda
             raise ValueError("ANTHROPIC_API_KEY is not set")
         model = model or os.getenv("ANTHROPIC_MODEL") or DEFAULT_CLAUDE_MODEL
         return _cached(("claude", key, model), lambda: ClaudeAdapter(key, model))
-    raise ValueError(f"Unknown LLM_PROVIDER: {name!r} (use mock, gemini or claude)")
+    if name == "ollama":
+        base_url = os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434").strip()
+        model = (model or os.getenv("OLLAMA_MODEL", DEFAULT_OLLAMA_MODEL)).strip()
+        try:
+            timeout_s = float(os.getenv("OLLAMA_TIMEOUT_SECONDS", "90"))
+        except ValueError:
+            raise ValueError("OLLAMA_TIMEOUT_SECONDS must be a number") from None
+        return _cached(
+            ("ollama", base_url, model, timeout_s),
+            lambda: OllamaAdapter(base_url, model, timeout_s),
+        )
+    raise ValueError(f"Unknown LLM_PROVIDER: {name!r} (use mock, gemini, claude or ollama)")
 
 
 # --- the retry loop ---------------------------------------------------------
@@ -482,7 +559,7 @@ def triage_alert(
     adapter: LLMAdapter,
     exemplars: Sequence[InjectedExemplar] = (),
     *,
-    timeout_s: float = TIMEOUT_S,
+    timeout_s: float | None = None,
     max_retries: int = MAX_RETRIES,
     backoffs: Sequence[float] = BACKOFF_SECONDS,
     sleep: Callable[[float], None] = time.sleep,
@@ -499,6 +576,8 @@ def triage_alert(
             f"prompt build failed: {type(exc).__name__}",
         )
 
+    if timeout_s is None:
+        timeout_s = getattr(adapter, "timeout_s", TIMEOUT_S)
     retries = 0
     while True:
         try:

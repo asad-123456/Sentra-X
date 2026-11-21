@@ -118,7 +118,7 @@ export interface AIAssessment {
   safety_floor_triggered: boolean;
   abstention_triggered: boolean;
   guardrail_audit_note?: string;
-  llm_provider: LLMProvider;
+  llm_provider: string | null;
   model_name: string;
   latency_ms: number;
   retry_count: number;
