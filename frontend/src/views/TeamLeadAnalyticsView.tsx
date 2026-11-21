@@ -1,13 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import type { AnalyticsSummary } from '../types/sentrax';
 import { getAnalytics, exportAuditCsv } from '../api/services';
+import { isLiveBackendConfigured } from '../api/client';
 import { KpiSummaryGrid } from '../components/analytics/KpiSummaryGrid';
 import { OverrideTrendChart } from '../components/analytics/OverrideTrendChart';
 import { SeverityDeltaCard } from '../components/analytics/SeverityDeltaCard';
 import {
   Download,
   RotateCcw,
-  Sparkles,
   Check,
   AlertCircle,
   Calendar,
@@ -15,64 +15,58 @@ import {
 } from 'lucide-react';
 
 export const TeamLeadAnalyticsView: React.FC = () => {
+  const live = isLiveBackendConfigured();
   const [dateRange, setDateRange] = useState<string>('30d');
   const [selectedRuleId, setSelectedRuleId] = useState<string>('ALL');
-  const [analytics, setAnalytics] = useState<AnalyticsSummary | null>(null);
-  const [isLoading, setIsLoading] = useState<boolean>(true);
-  const [isExporting, setIsExporting] = useState<boolean>(false);
-  const [exportSuccess, setExportSuccess] = useState<boolean>(false);
-  const [error, setError] = useState<string | null>(null);
+  const [refreshVersion, setRefreshVersion] = useState(0);
+  const [report, setReport] = useState<{ key: string; data?: AnalyticsSummary; error?: string } | null>(null);
+  const [isExporting, setIsExporting] = useState(false);
+  const [exportSuccess, setExportSuccess] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
 
+  const requestKey = JSON.stringify([dateRange, selectedRuleId, refreshVersion]);
+  const current = report?.key === requestKey ? report : null;
+  const analytics = current?.data;
+  const error = current?.error;
+  const isLoading = !current;
+
   const handleRefresh = () => {
-    setIsLoading(true);
-    setError(null);
     setExportError(null);
-    getAnalytics(dateRange, selectedRuleId)
-      .then((data) => {
-        setAnalytics(data);
-        setIsLoading(false);
-      })
-      .catch((err: unknown) => {
-        const message = err instanceof Error ? err.message : 'Analytics data could not be retrieved.';
-        setError(message);
-        setIsLoading(false);
-      });
+    setRefreshVersion((version) => version + 1);
   };
 
   useEffect(() => {
-    let isCancelled = false;
-
-    getAnalytics(dateRange, selectedRuleId)
+    const controller = new AbortController();
+    const { signal } = controller;
+    getAnalytics(dateRange, selectedRuleId, signal)
       .then((data) => {
-        if (!isCancelled) {
-          setAnalytics(data);
-          setIsLoading(false);
-        }
+        if (!signal.aborted) setReport({ key: requestKey, data });
       })
       .catch((err: unknown) => {
-        if (!isCancelled) {
+        if (!signal.aborted) {
           const message = err instanceof Error ? err.message : 'Analytics data could not be retrieved.';
-          setError(message);
-          setIsLoading(false);
+          setReport({ key: requestKey, error: message });
         }
       });
+    return () => controller.abort();
+  }, [dateRange, selectedRuleId, requestKey]);
 
-    return () => {
-      isCancelled = true;
-    };
-  }, [dateRange, selectedRuleId]);
+  useEffect(() => {
+    if (!exportSuccess) return;
+    const timer = setTimeout(() => setExportSuccess(false), 3000);
+    return () => clearTimeout(timer);
+  }, [exportSuccess]);
 
   const handleExport = async () => {
     setIsExporting(true);
     setExportError(null);
     try {
-      const csvData = await exportAuditCsv();
+      const csvData = await exportAuditCsv(analytics?.report_window);
       const blob = new Blob([csvData], { type: 'text/csv;charset=utf-8;' });
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
-      const today = new Date().toISOString().slice(0, 10);
+      const today = analytics?.report_window?.end_date ?? new Date().toISOString().slice(0, 10);
       link.setAttribute('download', `sentrax_audit_trail_${today}.csv`);
       document.body.appendChild(link);
       link.click();
@@ -80,7 +74,6 @@ export const TeamLeadAnalyticsView: React.FC = () => {
       URL.revokeObjectURL(url);
 
       setExportSuccess(true);
-      setTimeout(() => setExportSuccess(false), 3000);
     } catch (err) {
       console.error('CSV Export failed:', err);
       setExportError(err instanceof Error ? err.message : 'Failed to generate audit CSV export.');
@@ -98,12 +91,12 @@ export const TeamLeadAnalyticsView: React.FC = () => {
             <h1 className="text-xl font-bold tracking-tight text-zinc-50 font-mono">
               Triage Analytics &amp; Calibration
             </h1>
-            <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-zinc-900 text-zinc-400 border border-zinc-800">
+            {!live && <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-zinc-900 text-zinc-400 border border-zinc-800">
               Simulated Demo Fixture
-            </span>
+            </span>}
           </div>
           <p className="text-xs text-zinc-400 font-sans">
-            Analyst agreement metrics, override frequency, and audit logs.
+            Analyst agreement, overrides, and audit records. Dates are in UTC.
           </p>
         </div>
 
@@ -122,7 +115,7 @@ export const TeamLeadAnalyticsView: React.FC = () => {
           <button
             type="button"
             onClick={handleExport}
-            disabled={isExporting}
+            disabled={isExporting || (live && !analytics?.report_window)}
             className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-white hover:bg-zinc-200 text-black font-semibold text-xs font-mono shadow-md transition-all cursor-pointer disabled:opacity-60"
           >
             {exportSuccess ? (
@@ -153,7 +146,6 @@ export const TeamLeadAnalyticsView: React.FC = () => {
               { id: '7d', label: 'Last 7 Days' },
               { id: '30d', label: 'Last 30 Days' },
               { id: '90d', label: 'Last 90 Days' },
-              { id: 'all', label: 'All Time' },
             ].map((p) => (
               <button
                 key={p.id}
@@ -171,13 +163,22 @@ export const TeamLeadAnalyticsView: React.FC = () => {
           </div>
         </div>
 
-        {/* Rule Filter Dropdown */}
+        {/* Rule filter */}
         <div className="flex items-center gap-2">
           <div className="flex items-center gap-1.5 text-zinc-500 font-mono text-xs">
             <Filter className="size-3.5 text-zinc-400" />
             <span className="hidden sm:inline">Wazuh Rule:</span>
           </div>
-          <select
+          {live ? (
+            <input
+              aria-label="Wazuh rule ID"
+              value={selectedRuleId === 'ALL' ? '' : selectedRuleId}
+              onChange={(event) => setSelectedRuleId(event.target.value)}
+              placeholder="All rules"
+              className="bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-1.5 text-xs font-mono text-zinc-200"
+            />
+          ) : <select
+            aria-label="Wazuh rule ID"
             value={selectedRuleId}
             onChange={(e) => setSelectedRuleId(e.target.value)}
             className="bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-1.5 text-xs font-mono text-zinc-200 focus:outline-none focus:border-zinc-700 cursor-pointer"
@@ -188,13 +189,21 @@ export const TeamLeadAnalyticsView: React.FC = () => {
             <option value="100210">Rule 100210 (SSH Brute Force)</option>
             <option value="100220">Rule 100220 (Cron Persistence)</option>
             <option value="100230">Rule 100230 (Ransomware Shadow Copy)</option>
-          </select>
+          </select>}
         </div>
       </div>
 
+      {analytics?.report_window && (
+        <p className="text-xs text-zinc-400">
+          Reporting window {analytics.report_window.start_date} to {analytics.report_window.end_date} UTC.
+          {analytics.audit_event_count != null && ` CSV includes all ${analytics.audit_event_count} audit events in this window and rule filter.`}
+        </p>
+      )}
+      {isLoading && <p role="status" className="text-xs text-zinc-400">Loading analytics…</p>}
+
       {/* Error Banners */}
       {exportError && (
-        <div className="p-4 rounded-xl bg-red-950/40 border border-red-800/80 text-red-200 text-xs font-mono flex items-center justify-between gap-3">
+        <div role="alert" className="p-4 rounded-xl bg-red-950/40 border border-red-800/80 text-red-200 text-xs font-mono flex items-center justify-between gap-3">
           <div className="flex items-center gap-2">
             <AlertCircle className="size-4 text-red-400 shrink-0" />
             <span>{exportError}</span>
@@ -234,20 +243,6 @@ export const TeamLeadAnalyticsView: React.FC = () => {
       {/* Confusion Matrix & Guardrail Breakdown */}
       {analytics && <SeverityDeltaCard summary={analytics} isLoading={isLoading} />}
 
-      {/* Calibration Insight Card */}
-      <div className="p-4 rounded-xl bg-zinc-950 border border-zinc-850 flex items-start gap-3.5">
-        <div className="p-2 rounded-lg bg-cyan-950/60 border border-cyan-800/60 text-cyan-400 shrink-0 mt-0.5">
-          <Sparkles className="size-4" />
-        </div>
-        <div className="space-y-1">
-          <div className="text-xs font-mono font-bold text-zinc-200">
-            Dynamic Few-Shot Feedback Calibration
-          </div>
-          <p className="text-xs text-zinc-400 font-sans leading-relaxed">
-            As SOC analysts override decisions, active exemplars are indexed into the database and injected into future prompt retrievals for the matching rule and process signature. Over successive operating cycles, repeat human overrides decline significantly without requiring model weight fine-tuning.
-          </p>
-        </div>
-      </div>
     </div>
   );
 };

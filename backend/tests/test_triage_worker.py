@@ -1,39 +1,24 @@
 """Integration tests for the triage worker (Part 6B) on the migrated test database."""
 import json
-import os
 import time
 import uuid
 from datetime import datetime, timezone
 
 import pytest
-from sqlalchemy import create_engine, text
+from sqlalchemy import text
 from sqlalchemy.orm import sessionmaker
 
 from app.services.llm_adapter import MockAdapter
 from app.worker.jobs import TriageQueue
 from app.worker.triage_worker import TriageWorker, process_alert
 
-TEST_DB_URL = os.getenv(
-    "TEST_DATABASE_URL", "postgresql+psycopg://sentrax:sentrax@localhost:5432/sentrax_triage_test"
-)
 REF = datetime(2026, 11, 17, 12, 0, tzinfo=timezone.utc)
 LOG = {"full_log": "Failed password for root from 203.0.113.9 port 4242 ssh2"}
 
 
 @pytest.fixture(scope="module")
-def factory():
-    engine = create_engine(TEST_DB_URL, pool_pre_ping=True)
-    if not (engine.url.database or "").endswith("_test"):
-        engine.dispose()
-        pytest.fail("refusing to run: the database name must end in _test")
-    try:
-        with engine.connect() as conn:
-            conn.execute(text("SELECT 1 FROM alerts LIMIT 1"))
-    except Exception as exc:
-        engine.dispose()
-        pytest.skip(f"test database not reachable or not migrated ({type(exc).__name__})")
-    yield sessionmaker(bind=engine, autoflush=False)
-    engine.dispose()
+def factory(triage_test_engine):
+    return sessionmaker(bind=triage_test_engine, autoflush=False)
 
 
 @pytest.fixture()

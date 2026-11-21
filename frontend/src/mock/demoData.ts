@@ -1408,6 +1408,9 @@ export const INITIAL_AUDIT_TRAIL: AnalystDecisionAudit[] = [
 
 export const INITIAL_ANALYTICS: AnalyticsSummary = {
   total_closed: 280,
+  comparison_count: 280,
+  overridden_count: 24,
+  guardrail_interventions: 47,
   agreement_rate: 91.4,
   override_rate: 8.6,
   escalated_rate: 4.2,

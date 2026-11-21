@@ -2,22 +2,14 @@
  * Sentra-X Authentication & RBAC Context
  */
 
-import React, { createContext, useContext, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import type { User, UserRole } from '../types/sentrax';
 import { DEMO_USERS } from '../mock/demoData';
 import { apiClient, isLiveBackendConfigured } from '../api/client';
 
 interface LoginApiResponse {
   access_token: string;
-  token_type: string;
-  user: {
-    id: string;
-    username: string;
-    email: string;
-    role: UserRole;
-    is_active: boolean;
-    created_at?: string;
-  };
+  user: User;
 }
 
 interface AuthContextType {
@@ -26,7 +18,7 @@ interface AuthContextType {
   isLoading: boolean;
   login: (usernameOrEmail: string, password: string) => Promise<void>;
   logout: () => void;
-  switchDemoRole: (role: UserRole) => Promise<void> | void;
+  switchDemoRole?: (role: UserRole) => void;
   hasRole: (allowedRoles: UserRole[]) => boolean;
 }
 
@@ -34,118 +26,107 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 const TOKEN_KEY = 'sentrax_jwt_token';
 const USER_KEY = 'sentrax_current_user';
+const LIVE_MODE = isLiveBackendConfigured();
+
+interface Session {
+  user: User;
+  token: string;
+}
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [user, setUser] = useState<User | null>(() => {
-    try {
-      const storedUser = localStorage.getItem(USER_KEY);
-      const storedToken = localStorage.getItem(TOKEN_KEY);
-      if (storedUser && storedToken) {
-        return JSON.parse(storedUser);
-      }
-    } catch {
-      // Fallback if parsing fails
+  const [session, setSession] = useState<Session | null>(() => {
+    if (LIVE_MODE) return null;
+    const token = localStorage.getItem(TOKEN_KEY);
+    const user = DEMO_USERS.find((candidate) => token?.startsWith(`jwt-token-${candidate.role.toLowerCase()}-`));
+    return token && user ? { token, user } : null;
+  });
+  const [isRestoring, setIsRestoring] = useState(() => LIVE_MODE && !!localStorage.getItem(TOKEN_KEY));
+  const [isSigningIn, setIsSigningIn] = useState(false);
+
+  const logout = useCallback(() => {
+    localStorage.removeItem(TOKEN_KEY);
+    setSession(null);
+  }, []);
+
+  useEffect(() => {
+    localStorage.removeItem(USER_KEY);
+    if (!LIVE_MODE) return;
+
+    const controller = new AbortController();
+    const { signal } = controller;
+    const token = localStorage.getItem(TOKEN_KEY);
+    const isCurrentToken = () => !signal.aborted && localStorage.getItem(TOKEN_KEY) === token;
+
+    const handleUnauthorized = (event: Event) => {
+      if ((event as CustomEvent<string>).detail === localStorage.getItem(TOKEN_KEY)) logout();
+    };
+    window.addEventListener('sentrax:unauthorized', handleUnauthorized);
+
+    if (token) {
+      void apiClient<User>('/api/v1/auth/me', { signal })
+        .then((user) => {
+          if (isCurrentToken()) setSession({ user, token });
+        })
+        .catch(() => {
+          if (isCurrentToken()) logout();
+        })
+        .finally(() => {
+          if (!signal.aborted) setIsRestoring(false);
+        });
     }
-    return null;
-  });
 
-  const [token, setToken] = useState<string | null>(() => {
-    const storedUser = localStorage.getItem(USER_KEY);
-    const storedToken = localStorage.getItem(TOKEN_KEY);
-    return storedUser && storedToken ? storedToken : null;
-  });
+    return () => {
+      controller.abort();
+      window.removeEventListener('sentrax:unauthorized', handleUnauthorized);
+    };
+  }, [logout]);
 
-  const [isLoading, setIsLoading] = useState<boolean>(false);
+  const startSession = (user: User, token: string) => {
+    localStorage.setItem(TOKEN_KEY, token);
+    setSession({ user, token });
+  };
+
+  const startDemoSession = (user: User) => {
+    startSession(user, `jwt-token-${user.role.toLowerCase()}-${Date.now()}`);
+  };
+
+  const switchDemoRole = LIVE_MODE ? undefined : (role: UserRole) => {
+    const user = DEMO_USERS.find((candidate) => candidate.role === role);
+    if (user) startDemoSession(user);
+  };
 
   const login = async (usernameOrEmail: string, password: string): Promise<void> => {
-    setIsLoading(true);
-
-    // Live backend authentication flow
-    if (isLiveBackendConfigured()) {
-      try {
-        const response = await apiClient<LoginApiResponse>('/api/v1/auth/login', {
+    setIsSigningIn(true);
+    try {
+      if (LIVE_MODE) {
+        const { user, access_token } = await apiClient<LoginApiResponse>('/api/v1/auth/login', {
           method: 'POST',
-          body: JSON.stringify({
-            username: usernameOrEmail.trim(),
-            password,
-          }),
+          body: JSON.stringify({ username: usernameOrEmail.trim(), password }),
         });
-
-        const liveUser: User = {
-          id: String(response.user.id),
-          username: response.user.username,
-          email: response.user.email,
-          role: response.user.role,
-          is_active: response.user.is_active,
-          created_at: response.user.created_at || new Date().toISOString(),
-        };
-
-        setUser(liveUser);
-        setToken(response.access_token);
-        localStorage.setItem(TOKEN_KEY, response.access_token);
-        localStorage.setItem(USER_KEY, JSON.stringify(liveUser));
-        setIsLoading(false);
+        startSession(user, access_token);
         return;
-      } catch (err) {
-        setIsLoading(false);
-        throw err;
       }
-    }
 
-    // Offline / Mock fallback flow
-    await new Promise((resolve) => setTimeout(resolve, 200));
-
-    const foundUser = DEMO_USERS.find(
-      (u) =>
-        u.email.toLowerCase() === usernameOrEmail.toLowerCase().trim() ||
-        u.username.toLowerCase() === usernameOrEmail.toLowerCase().trim()
-    );
-
-    if (!foundUser || password.trim().length === 0) {
-      setIsLoading(false);
-      throw new Error('HTTP 401 Unauthorized: Invalid username, email or password.');
-    }
-
-    const mockToken = `jwt-token-${foundUser.role.toLowerCase()}-${Date.now()}`;
-    setUser(foundUser);
-    setToken(mockToken);
-    localStorage.setItem(TOKEN_KEY, mockToken);
-    localStorage.setItem(USER_KEY, JSON.stringify(foundUser));
-    setIsLoading(false);
-  };
-
-  const logout = () => {
-    setUser(null);
-    setToken(null);
-    localStorage.removeItem(TOKEN_KEY);
-    localStorage.removeItem(USER_KEY);
-  };
-
-  const switchDemoRole = async (role: UserRole): Promise<void> => {
-    const targetUser = DEMO_USERS.find((u) => u.role === role) || DEMO_USERS[0];
-    if (isLiveBackendConfigured()) {
-      try {
-        await login(targetUser.username, 'sentrax2026');
-        return;
-      } catch (err) {
-        console.warn('Live switchDemoRole failed:', err);
-        throw new Error(
-          `Live authentication failed for role '${role}'. Verify that the backend is running at ${import.meta.env.VITE_API_BASE_URL} and settings.DEMO_MODE is active.`,
-          { cause: err }
-        );
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      const identifier = usernameOrEmail.trim().toLowerCase();
+      const user = DEMO_USERS.find(
+        (candidate) => candidate.email.toLowerCase() === identifier || candidate.username.toLowerCase() === identifier,
+      );
+      if (!user || !password.trim()) {
+        throw new Error('HTTP 401 Unauthorized: Invalid username, email or password.');
       }
+      startDemoSession(user);
+    } finally {
+      setIsSigningIn(false);
     }
-
-    const mockToken = `jwt-token-${role.toLowerCase()}-${Date.now()}`;
-    setUser(targetUser);
-    setToken(mockToken);
-    localStorage.setItem(TOKEN_KEY, mockToken);
-    localStorage.setItem(USER_KEY, JSON.stringify(targetUser));
   };
+
+  const user = session?.user ?? null;
+  const token = session?.token ?? null;
+  const isLoading = isRestoring || isSigningIn;
 
   const hasRole = (allowedRoles: UserRole[]): boolean => {
-    if (!user) return false;
-    return allowedRoles.includes(user.role);
+    return user !== null && allowedRoles.includes(user.role);
   };
 
   return (

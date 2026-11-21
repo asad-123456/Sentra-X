@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import sys
-import os
 
 # Ensure UTF-8 output on Windows console
 if sys.platform == "win32":
@@ -12,6 +11,11 @@ from pathlib import Path
 BACKEND_DIR = Path(__file__).resolve().parent.parent
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
+
+if __name__ == "__main__":
+    import pytest
+
+    raise SystemExit(pytest.main([__file__, "-s", "-rs"]))
 
 import uuid
 from sqlalchemy import text
@@ -189,11 +193,5 @@ def run_db_schema_tests():
         return True
 
 
-def test_schema_and_immutability_trigger():
+def test_schema_and_immutability_trigger(application_test_database):
     assert run_db_schema_tests() is True
-
-
-if __name__ == "__main__":
-    success = run_db_schema_tests()
-    if not success:
-        sys.exit(1)

@@ -1,13 +1,19 @@
 # Sentra-X Git Ignore Configuration
 
-# Documentation & AI Context (as requested)
+# Historical Antigravity notes
 gemini-docs/
-gemini-docs
 
-# AI Agent Configuration & Skills
+# Local AI tooling and notes
 .agents/
 .claude/
-agent/
+.codex/
+.cursor/
+/agent/
+/memory/
+AGENTS.md
+CLAUDE.md
+GEMINI.md
+/IMPLEMENTATION_PLAN.md
 skills-lock.json
 
 # Dependencies
@@ -30,6 +36,7 @@ build/
 *.pem
 *.key
 *.cert
+sentrax-webhook.secret
 
 # Python Cache & Virtual Environments
 __pycache__/
@@ -79,9 +86,6 @@ desktop.ini
 *.njsproj
 *.sln
 
-
-.venv/
-.env
-__pycache__/
+# Ad hoc Wazuh captures
 alerts_raw.jsonl
 fim_alerts.jsonl

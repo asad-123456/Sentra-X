@@ -142,7 +142,7 @@ flowchart LR
 
 ### 2.3 Sprint & Supervisor Review Cadence
 * **Bi-Weekly Practical Lab Checkpoints:** Conducted in **DDL Lab** with **Mr. Muhammad Ali Akhtar** and **Mr. Khurram Alvi**, paired with theory alignment reviews under **Dr. Fakhra Aftab**.
-* **Definition of Done (DoD):** A module is marked complete only when: (a) database persistence and API integration are verified end-to-end, (b) RBAC (`FR-8`) and deterministic safety rules (`FR-3`) pass unit/integration tests, and (c) [gemini.md](file:///c:/projects/SentraX/docs/gemini.md) is updated.
+* **Definition of Done (DoD):** A module is marked complete only when: (a) database persistence and API integration are verified end-to-end, (b) RBAC (`FR-8`) and deterministic safety rules (`FR-3`) pass unit/integration tests, and (c) verification results are recorded for the milestone.
 
 ---
 
@@ -458,9 +458,8 @@ For the **Testing Document (`Due: 25 Nov 2026`)**, the `EvaluationRunner` (`FR-1
 * **Subsystem branches:** Scoped by owner and feature (`asad/db-schema-orm`, `asad/react-queue-modal`, `atta/wazuh-ingestion-rbac`, `abdur/evidence-pack-safety-floor`).
 
 ### 9.2 Documentation & Persistent Context Protocol
-* **[sentraX_srs.md](file:///c:/projects/SentraX/docs/sentraX_srs.md):** Canonical requirements baseline.
-* **[sentraX_project_plan.md](file:///c:/projects/SentraX/docs/sentraX_project_plan.md):** Canonical schedule and module distribution plan.
-* **[gemini.md](file:///c:/projects/SentraX/docs/gemini.md):** Updated after every database, backend, or frontend milestone.
+* The [requirements specification](sentraX_srs.md) is the canonical requirements baseline.
+* This document records the schedule and module distribution plan.
 
 ### 9.3 Final CD Submission & Module Distribution Handover Checklist (Nov 25–27)
 1. **Final Project CD (`25 Nov 2026`):** Contains complete source code (`backend/`, `frontend/`, `docker-compose.yml`), database migration & seed scripts, benchmark datasets, and all formal PDF documents (Proposal, SRS, Project Plan, Design Document, Testing Document).

@@ -21,7 +21,7 @@ interface AssetRegistryTableProps {
     tier: AssetCriticalityTier,
     description?: string
   ) => Promise<void>;
-  onRegisterAsset: (
+  onRegisterAsset?: (
     newAsset: Omit<Asset, 'id' | 'created_at' | 'updated_at'>
   ) => Promise<void>;
 }
@@ -57,7 +57,7 @@ export const AssetRegistryTable: React.FC<AssetRegistryTableProps> = ({
     return (
       asset.agent_id.toLowerCase().includes(q) ||
       asset.hostname.toLowerCase().includes(q) ||
-      asset.ip_address.toLowerCase().includes(q) ||
+      (asset.ip_address ?? '').toLowerCase().includes(q) ||
       (asset.description && asset.description.toLowerCase().includes(q))
     );
   });
@@ -91,8 +91,9 @@ export const AssetRegistryTable: React.FC<AssetRegistryTableProps> = ({
 
   const handleCreateSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newAgentId.trim() || !newHostname.trim() || !newIpAddress.trim()) {
-      setFormError('Agent ID, Hostname, and IP Address are mandatory fields.');
+    if (!onRegisterAsset) return;
+    if (!newAgentId.trim() || !newHostname.trim()) {
+      setFormError('Enter the agent ID and hostname.');
       return;
     }
     setFormError(null);
@@ -101,7 +102,7 @@ export const AssetRegistryTable: React.FC<AssetRegistryTableProps> = ({
       await onRegisterAsset({
         agent_id: newAgentId.trim(),
         hostname: newHostname.trim().toUpperCase(),
-        ip_address: newIpAddress.trim(),
+        ip_address: newIpAddress.trim() || null,
         criticality_tier: newTier,
         description: newDesc.trim() || undefined,
       });
@@ -135,14 +136,14 @@ export const AssetRegistryTable: React.FC<AssetRegistryTableProps> = ({
           />
         </div>
 
-        <button
+        {onRegisterAsset && <button
           type="button"
           onClick={() => setShowAddForm(!showAddForm)}
           className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-lg bg-white hover:bg-zinc-200 text-black font-semibold text-xs font-mono shadow-md transition-colors cursor-pointer self-start sm:self-auto"
         >
           <Plus className="size-3.5" />
           <span>Register Host</span>
-        </button>
+        </button>}
       </div>
 
       {/* New Asset Registration Drawer/Modal */}
@@ -198,14 +199,14 @@ export const AssetRegistryTable: React.FC<AssetRegistryTableProps> = ({
             </div>
 
             <div className="space-y-1">
-              <label className="text-[10px] font-mono text-zinc-400">IP ADDRESS *</label>
+              <label htmlFor="registry-ip" className="text-[10px] font-mono text-zinc-400">IP ADDRESS</label>
               <input
+                id="registry-ip"
                 type="text"
                 value={newIpAddress}
                 onChange={(e) => setNewIpAddress(e.target.value)}
                 placeholder="10.0.1.25"
                 className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-1.5 text-xs font-mono text-zinc-100 focus:outline-none focus:border-zinc-700"
-                required
               />
             </div>
 
@@ -325,7 +326,7 @@ export const AssetRegistryTable: React.FC<AssetRegistryTableProps> = ({
 
                       {/* IP Address */}
                       <td className="py-3.5 px-4 font-mono text-zinc-300">
-                        {asset.ip_address}
+                        {asset.ip_address ?? '—'}
                       </td>
 
                       {/* Criticality Tier */}

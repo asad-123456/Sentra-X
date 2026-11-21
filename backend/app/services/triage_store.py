@@ -2,7 +2,7 @@
 
     load_triage_inputs(session, alert_id)         phase 1, reads  -> TriageInputs
     run_triage_pipeline(inputs, adapter)          phase 2, no DB  (triage_pipeline.py)
-    persist_outcome(session, alert_id, outcome)   phase 3, writes -> status it set
+    persist_outcome(session, alert_id, outcome, expected_generation=...)   phase 3, writes -> status it set
 
 Neither function here commits; the caller owns the transaction. Plain SQL is used
 instead of the ORM models so the column names are exactly the ones in the migrations.
@@ -75,7 +75,7 @@ _SQL_BY_IP = text("""
 
 # --- writes -------------------------------------------------------------------
 _SQL_LOCK_ALERT = text(
-    "SELECT status FROM alerts WHERE id = CAST(:alert_id AS uuid) FOR UPDATE"
+    "SELECT status, triage_generation FROM alerts WHERE id = CAST(:alert_id AS uuid) FOR UPDATE"
 )
 _SQL_UPSERT_PACK = text("""
     INSERT INTO evidence_packs
@@ -264,11 +264,13 @@ def _j(value: Any) -> str:
     return json.dumps(_strip_nul(value))
 
 
-def persist_outcome(session: Session, alert_id: UUID | str, outcome: TriageOutcome) -> str | None:
+def persist_outcome(
+    session: Session, alert_id: UUID | str, outcome: TriageOutcome, *, expected_generation: int,
+) -> str | None:
     """Save the pack and assessment and move the alert to outcome.next_status.
 
-    Returns the status it set, or None (and writes nothing) if the alert is no
-    longer PENDING_REVIEW, so a human decision is never overwritten. Does not commit.
+    Returns the status it set, or None if the alert's pending attempt has changed.
+    Does not commit.
     On a failed run the pack is kept, any old assessment is deleted, and the alert
     goes to NEEDS_MANUAL_TRIAGE. alerts.retry_count records the LLM retries used."""
     if outcome.next_status not in _ALLOWED_NEXT_STATUS:
@@ -279,8 +281,7 @@ def persist_outcome(session: Session, alert_id: UUID | str, outcome: TriageOutco
     row = session.execute(_SQL_LOCK_ALERT, key).first()
     if row is None:
         raise LookupError(f"alert {alert_id} not found")
-    if row[0] != STATUS_PENDING_REVIEW:
-        logger.warning("Alert %s is %s, not PENDING_REVIEW; triage result not saved", alert_id, row[0])
+    if row.status != STATUS_PENDING_REVIEW or row.triage_generation != expected_generation:
         return None
 
     pack = outcome_to_pack_fields(outcome)

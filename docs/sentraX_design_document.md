@@ -41,7 +41,7 @@
 | **Department & Institution** | Department of Computer and Information Systems Engineering, **NED University of Engineering & Technology** |
 | **Course Instructors & Supervisors** | **Mr. Muhammad Ali Akhtar** (Practical Class Teacher, DDL Lab, Mr. Khurram Alvi) & **Dr. Fakhra Aftab** (Theory Class Teacher) |
 | **Project Authors / Engineering Team** | **Asad Ullah Zafar** (`CS-24082`), **Atta Ur Rehman** (`CS-24092`), **Abdur Rehman** (`CS-24098`) |
-| **Companion Specifications** | Sentra-X Software Requirements Specification (**SRS v1.4**, Oct 14, 2026), Software Project Management Plan (**SPMP v1.1**, Oct 12, 2026), Database Architecture Reference ([`database_documentation.md`](file:///c:/projects/SentraX/docs/database_documentation.md)), Backend API Reference ([`backend_architecture_and_api_documentation.md`](file:///c:/projects/SentraX/docs/backend_architecture_and_api_documentation.md)) |
+| **Companion Specifications** | Sentra-X Software Requirements Specification (**SRS v1.4**, Oct 14, 2026), Software Project Management Plan (**SPMP v1.1**, Oct 12, 2026), Database Architecture Reference ([`database_documentation.md`](database_documentation.md)), Backend API Reference ([`backend_architecture_and_api_documentation.md`](backend_architecture_and_api_documentation.md)) |
 
 ---
 
@@ -245,12 +245,12 @@ flowchart TB
 
 | Subsystem Module | Mapped Requirements | Engineering Lead | Companion Documentation |
 | :--- | :--- | :--- | :--- |
-| **Frontend SPA & UI/UX** | `FR-5`, `FR-6`, `FR-7`, `FR-8` UI | **Asad Ullah Zafar** (`CS-24082`) | [`frontend_design.md`](file:///c:/projects/SentraX/gemini-docs/frontend_design.md), [`frontend_flow.md`](file:///c:/projects/SentraX/gemini-docs/frontend_flow.md) |
-| **PostgreSQL 16 Schema & ORM** | `Section 7`, `NFR-4`, `FR-6` Trigger | **Asad Ullah Zafar** (`CS-24082`) | [`database_documentation.md`](file:///c:/projects/SentraX/gemini-docs/database/database_documentation.md), Alembic `0001` & `0002` |
-| **Wazuh Ingestion & Noise Filter** | `FR-1`, `FR-9`, `NFR-2`, `NFR-5` | **Atta Ur Rehman** (`CS-24092`) | [`sentraX_project_plan.md`](file:///c:/projects/SentraX/docs/sentraX_project_plan.md) (`WP-3`) |
-| **JWT RBAC & Exemplar Retrieval**| `FR-4`, `FR-8`, `NFR-3` | **Atta Ur Rehman** (`CS-24092`) | [`credentials.md`](file:///c:/projects/SentraX/gemini-docs/credentials.md), `auth.py`, `governance.py` |
-| **Evidence Assembly & Sanitizer** | `FR-2`, `NFR-3` | **Abdur Rehman** (`CS-24098`) | [`progress_report_for_abr_and_answers.md`](file:///c:/projects/SentraX/gemini-docs/progress_report_for_abr_and_answers.md) |
-| **RulesEngine & LLM Adapters** | `FR-2`, `FR-3`, `FR-10` | **Abdur Rehman** (`CS-24098`) | `rules_engine.py`, `evaluation.py`, [`decisions.md`](file:///c:/projects/SentraX/decisions.md) |
+| **Frontend SPA & UI/UX** | `FR-5`, `FR-6`, `FR-7`, `FR-8` UI | **Asad Ullah Zafar** (`CS-24082`) | Original design notes `frontend_design.md` and `frontend_flow.md`, [current frontend guide](../frontend/README.md) |
+| **PostgreSQL 16 Schema & ORM** | `Section 7`, `NFR-4`, `FR-6` Trigger | **Asad Ullah Zafar** (`CS-24082`) | [`database_documentation.md`](database_documentation.md), Alembic `0001` & `0002` |
+| **Wazuh Ingestion & Noise Filter** | `FR-1`, `FR-9`, `NFR-2`, `NFR-5` | **Atta Ur Rehman** (`CS-24092`) | [`sentraX_project_plan.md`](sentraX_project_plan.md) (`WP-3`) |
+| **JWT RBAC & Exemplar Retrieval**| `FR-4`, `FR-8`, `NFR-3` | **Atta Ur Rehman** (`CS-24092`) | Original account notes `credentials.md`, [named account setup](../backend/README.md#named-accounts), `auth.py`, `governance.py` |
+| **Evidence Assembly & Sanitizer** | `FR-2`, `NFR-3` | **Abdur Rehman** (`CS-24098`) | Original `progress_report_for_abr_and_answers.md`, [runtime flow](backend_architecture_and_api_documentation.md#runtime-flow) |
+| **RulesEngine & LLM Adapters** | `FR-2`, `FR-3`, `FR-10` | **Abdur Rehman** (`CS-24098`) | [Rules engine](../backend/app/services/rules_engine.py), [model adapters](../backend/app/services/llm_adapter.py), [evaluation](../backend/app/routers/evaluation.py) |
 
 ### 2.4 Architectural Decision Records (ADR Summary)
 * **ADR 2.1 (Decoupled React 19 SPA):** Pure static client eliminating Next.js/SSR hydration overhead for instant queue sorting and zero hosting cost.
@@ -756,6 +756,8 @@ stateDiagram-v2
 
 #### Formal State Transition Matrix
 
+The [current API transition matrix](backend_architecture_and_api_documentation.md#queue-and-decisions) includes the approved manual closure path for pending alerts.
+
 | Current State | Trigger Action | Permitted Role | Target State | Side Effects & Invariants |
 | :--- | :--- | :--- | :--- | :--- |
 | `[Initial]` | Polling / Webhook | System | `PENDING_REVIEW` | Deduplicated on `wazuh_alert_id`; auto-registers unseen host as `MEDIUM`. |
@@ -1088,7 +1090,7 @@ To ensure continuous integration testing against the actual PostgreSQL 18.6 inst
 | **Admin** | `PATCH`| `/api/v1/admin/config` | Admin only | Dynamically updates system configuration parameters. |
 
 ### 6.3 Graphical User Interface (UI/UX) Architecture & Wireframes
-The UI design language is specified in [`frontend_design.md`](file:///c:/projects/SentraX/gemini-docs/frontend_design.md) and programmatically mapped to **6 Core Penpot Wireframe Screens** (`Sentra-X_wireframes_V2.pdf`):
+The original `frontend_design.md` specified the UI design language, which is mapped to the **6 core Penpot wireframe screens**. [Penpot wireframes](Sentra-X_wireframes_V2.pdf)
 * **Screen 1 — SOC Authentication Gate (`/login`):** Professional login dialog with role demo-switchers and inline HTTP 401 error banners.
 * **Screen 2 — Prioritized Analyst Triage Queue (`/queue`):** Sortable, filterable 7-column table with tab counters (`Awaiting Review`, `Escalated`, `Closed Audit Log`), severity shields, confidence bars, and $\le 2$-click quick approval.
 * **Screen 3 — Split-Pane Alert Detail & Evidence Modal:** Left pane displays AI assessment, safety floor strikethrough banners, abstention indicators, and historical exemplars; right pane provides interactive expandable Evidence Tree with cyan pulse highlighting on cited keys. Sticky action footer hosts context-aware decision buttons and the $\ge 10$-character override drawer.

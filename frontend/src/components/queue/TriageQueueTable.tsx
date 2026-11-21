@@ -16,6 +16,11 @@ interface TriageQueueTableProps {
   onResetFilters: () => void;
 }
 
+function canQuickApprove(alert: AlertListItem): boolean {
+  return !!alert.available_actions?.includes('APPROVE') && !alert.abstention_triggered &&
+    (alert.effective_verdict === 'TRUE_POSITIVE' || alert.effective_verdict === 'FALSE_POSITIVE');
+}
+
 export const TriageQueueTable: React.FC<TriageQueueTableProps> = ({
   alerts,
   isLoading,
@@ -41,13 +46,7 @@ export const TriageQueueTable: React.FC<TriageQueueTableProps> = ({
     e.stopPropagation();
 
     // Block automated approval if alert requires manual triage or analyst review
-    if (
-      alert.status !== 'AWAITING_ANALYST' ||
-      alert.effective_verdict === 'NEEDS_MANUAL_TRIAGE' ||
-      alert.effective_verdict === 'NEEDS_ANALYST_REVIEW'
-    ) {
-      return;
-    }
+    if (!canQuickApprove(alert) || isApprovingId) return;
 
     if (confirmingAlertId === alert.id) {
 
@@ -158,10 +157,7 @@ export const TriageQueueTable: React.FC<TriageQueueTableProps> = ({
             ) : (
               // Alerts Data Rows
               alerts.map((alert) => {
-                const isManualTriage =
-                  alert.status === 'NEEDS_MANUAL_TRIAGE' ||
-                  alert.effective_verdict === 'NEEDS_MANUAL_TRIAGE';
-                const isNeedsReview = alert.effective_verdict === 'NEEDS_ANALYST_REVIEW';
+                const quickAllowed = canQuickApprove(alert);
                 const isConfirming = confirmingAlertId === alert.id;
                 const isApproving = isApprovingId === alert.id;
 
@@ -174,10 +170,9 @@ export const TriageQueueTable: React.FC<TriageQueueTableProps> = ({
                   >
                     {/* Column 1: Severity */}
                     <td className="py-3.5 px-4 align-middle">
-                      <SeverityBadge
-                        severity={alert.effective_severity}
-                        safetyFloorUpgraded={alert.safety_floor_triggered}
-                      />
+                      {alert.effective_severity ? (
+                        <SeverityBadge severity={alert.effective_severity} safetyFloorUpgraded={alert.safety_floor_triggered} />
+                      ) : <span className="text-zinc-400">—</span>}
                     </td>
 
                     {/* Column 2: Rule & Threat Details */}
@@ -187,8 +182,7 @@ export const TriageQueueTable: React.FC<TriageQueueTableProps> = ({
                       </div>
                       <div className="text-[11px] text-zinc-400 mt-1 flex flex-wrap items-center gap-1.5">
                         <span className="text-zinc-300 font-mono">Rule {alert.rule_id}</span>
-                        <span className="text-zinc-700">•</span>
-                        <span>MITRE {alert.mitre_techniques.join(', ')}</span>
+                        {alert.mitre_techniques?.length > 0 && <span>MITRE {alert.mitre_techniques.join(', ')}</span>}
                       </div>
                       <div className="text-[11px] text-zinc-400 font-sans italic truncate max-w-md mt-1">
                         "{alert.explanation_snippet || alert.truncated_explanation}"
@@ -212,7 +206,11 @@ export const TriageQueueTable: React.FC<TriageQueueTableProps> = ({
 
                     {/* Column 4: AI Verdict */}
                     <td className="py-3.5 px-4 align-middle">
-                      <VerdictBadge verdict={alert.effective_verdict} />
+                      {alert.status === 'PENDING_REVIEW' ? (
+                        <span className="text-xs font-mono text-zinc-400">AI pending</span>
+                      ) : (
+                        <VerdictBadge verdict={alert.effective_verdict ?? 'NEEDS_MANUAL_TRIAGE'} />
+                      )}
                     </td>
 
                     {/* Column 5: Confidence */}
@@ -240,22 +238,20 @@ export const TriageQueueTable: React.FC<TriageQueueTableProps> = ({
 
                         <div className="flex items-center gap-1.5">
                           {/* 2-Click Quick Approve Button (Awaiting Analyst only) */}
-                          {alert.status === 'AWAITING_ANALYST' && (
+                          {alert.available_actions?.includes('APPROVE') && (
                             <button
                               type="button"
                               onClick={(e) => handleQuickApproveClick(e, alert)}
-                              disabled={isManualTriage || isNeedsReview || isApproving}
+                              disabled={!quickAllowed || isApprovingId !== null}
                               title={
-                                isManualTriage
-                                  ? 'Manual review required — automated approval disabled'
-                                  : isNeedsReview
-                                  ? 'Abstention / Safety Floor active — inspect alert to select verdict'
+                                !quickAllowed
+                                  ? 'Open the alert to confirm a verdict'
                                   : isConfirming
                                   ? 'Click again to confirm approval'
                                   : 'Quick approve AI verdict directly from queue'
                               }
                               className={`flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-mono font-medium transition-all ${
-                                isManualTriage || isNeedsReview
+                                !quickAllowed
                                   ? 'bg-zinc-900 text-zinc-600 border border-zinc-800 cursor-not-allowed opacity-60'
                                   : isConfirming
                                   ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-[0_0_10px_rgba(16,185,129,0.4)] animate-pulse'

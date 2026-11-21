@@ -1,0 +1,35 @@
+worker_processes 1;
+pid logs/sentrax-m06.pid;
+error_log logs/sentrax-m06-error.log warn;
+
+events {
+    worker_connections 128;
+}
+
+http {
+    log_format delivery '$remote_addr "$request_method $uri" $status $upstream_status';
+    access_log logs/sentrax-m06-access.log delivery;
+
+    server {
+        listen __HOST_IP__:__HTTPS_PORT__ ssl;
+        server_name _;
+        ssl_certificate ../cert/server.pem;
+        ssl_certificate_key ../cert/server.key;
+        ssl_protocols TLSv1.2 TLSv1.3;
+
+        location = /api/webhooks/wazuh {
+            allow __WAZUH_IP__;
+            deny all;
+            limit_except POST { deny all; }
+            client_max_body_size 1m;
+            client_body_timeout 5s;
+            proxy_connect_timeout 3s;
+            proxy_read_timeout 10s;
+            proxy_pass http://127.0.0.1:__BACKEND_PORT__/api/webhooks/wazuh;
+        }
+
+        location / {
+            return 404;
+        }
+    }
+}

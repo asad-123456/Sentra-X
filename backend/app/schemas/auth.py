@@ -1,9 +1,15 @@
 from __future__ import annotations
 
+import re
 from enum import Enum
-from typing import Optional
 from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field
+
+ACCOUNT_USERNAME_PATTERN = re.compile(r"[A-Za-z0-9._-]{3,64}")
+
+
+def is_valid_account_email(email: str) -> bool:
+    return len(email) <= 255 and re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email) is not None
 
 
 class UserRole(str, Enum):

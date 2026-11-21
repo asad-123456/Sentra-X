@@ -4,7 +4,7 @@ from typing import Any, Dict, List, Optional, Union
 from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field
 
-from .common import AlertStatus, AssetCriticality, Severity, Verdict
+from .common import AlertStatus, AssetCriticality, DecisionAction, Severity, Verdict
 
 
 class AlertQueueItem(BaseModel):
@@ -18,9 +18,12 @@ class AlertQueueItem(BaseModel):
     agent_id: str
     agent_name: Optional[str] = None
     hostname: str
-    ip_address: str
+    ip_address: Optional[str] = None
+    mitre_tactics: list[str] = Field(default_factory=list)
+    mitre_techniques: list[str] = Field(default_factory=list)
     asset_criticality: AssetCriticality
     status: AlertStatus
+    available_actions: list[DecisionAction]
     ingested_at: str
     effective_verdict: Optional[Verdict] = None
     effective_severity: Optional[Severity] = None

@@ -6,7 +6,7 @@ RUN npm ci --no-audit --no-fund --fetch-timeout=180000 --fetch-retries=10
 COPY frontend/ .
 # A non-empty VITE_API_BASE_URL switches the UI from mock data to the live API.
 # nginx serves the UI and proxies /api on the same origin, so there is no CORS to set up.
-ARG VITE_API_BASE_URL=https://localhost:8443
+ARG VITE_API_BASE_URL=/
 ENV VITE_API_BASE_URL=$VITE_API_BASE_URL
 # vite build only; the separate `tsc -b` type check is a lint step, not needed to produce the site
 RUN npx vite build

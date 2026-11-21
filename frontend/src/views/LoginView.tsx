@@ -5,12 +5,11 @@ import { useAuth } from '../context/AuthContext';
 import type { UserRole } from '../types/sentrax';
 
 export const LoginView: React.FC = () => {
-  const [usernameOrEmail, setUsernameOrEmail] = useState('analyst@sentrax.internal');
+  const { login, isLoading, switchDemoRole } = useAuth();
+  const [usernameOrEmail, setUsernameOrEmail] = useState(switchDemoRole ? 'analyst@sentrax.internal' : '');
   const [password, setPassword] = useState('');
   const [errorBanner, setErrorBanner] = useState<string | null>(null);
-  const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const { login, switchDemoRole } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -18,8 +17,8 @@ export const LoginView: React.FC = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isLoading) return;
     setErrorBanner(null);
-    setIsSubmitting(true);
 
     try {
       await login(usernameOrEmail, password);
@@ -30,21 +29,14 @@ export const LoginView: React.FC = () => {
       } else {
         setErrorBanner('HTTP 401 Unauthorized: Invalid username or password.');
       }
-    } finally {
-      setIsSubmitting(false);
     }
   };
 
-  const handleQuickRole = async (role: UserRole) => {
+  const handleQuickRole = (role: UserRole) => {
+    if (isLoading || !switchDemoRole) return;
     setErrorBanner(null);
-    try {
-      await switchDemoRole(role);
-      navigate(from, { replace: true });
-    } catch (err: unknown) {
-      setErrorBanner(
-        err instanceof Error ? err.message : `Failed to authenticate live user for role '${role}'.`
-      );
-    }
+    switchDemoRole(role);
+    navigate(from, { replace: true });
   };
 
   return (
@@ -80,7 +72,7 @@ export const LoginView: React.FC = () => {
         <div className="bg-zinc-950 border border-zinc-800 rounded-xl p-6 shadow-2xl space-y-5">
           {/* Inline Error Alert Banner */}
           {errorBanner && (
-            <div className="p-3.5 rounded-lg bg-red-950/30 border border-red-500/40 text-red-300 text-xs font-mono flex items-start gap-2.5 shadow-[0_0_12px_rgba(239,68,68,0.15)]">
+            <div role="alert" className="p-3.5 rounded-lg bg-red-950/30 border border-red-500/40 text-red-300 text-xs font-mono flex items-start gap-2.5 shadow-[0_0_12px_rgba(239,68,68,0.15)]">
               <AlertCircle className="size-4 text-red-400 shrink-0 mt-0.5" />
               <span>{errorBanner}</span>
             </div>
@@ -97,10 +89,10 @@ export const LoginView: React.FC = () => {
               <input
                 id="usernameOrEmail"
                 type="text"
+                autoComplete="username"
                 required
                 value={usernameOrEmail}
                 onChange={(e) => setUsernameOrEmail(e.target.value)}
-                placeholder="analyst@sentrax.internal"
                 className="w-full px-3 py-2 rounded-lg bg-black border border-zinc-800 focus:border-zinc-500 text-zinc-100 text-sm font-mono focus:outline-none focus:ring-1 focus:ring-zinc-400 transition-all placeholder:text-zinc-600"
               />
             </div>
@@ -115,54 +107,56 @@ export const LoginView: React.FC = () => {
               <input
                 id="password"
                 type="password"
+                autoComplete="current-password"
                 required
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="••••••••••••"
                 className="w-full px-3 py-2 rounded-lg bg-black border border-zinc-800 focus:border-zinc-500 text-zinc-100 text-sm font-mono focus:outline-none focus:ring-1 focus:ring-zinc-400 transition-all placeholder:text-zinc-600"
               />
-              <p className="text-[11px] text-zinc-500 font-mono">Demo password: password123</p>
+              {switchDemoRole && <p className="text-[11px] text-zinc-500 font-mono">Demo password: password123</p>}
             </div>
 
             <button
               type="submit"
-              disabled={isSubmitting}
+              disabled={isLoading}
               className="w-full py-2.5 px-4 rounded-lg bg-zinc-100 text-black font-semibold text-sm hover:bg-white active:bg-zinc-200 transition-colors flex items-center justify-center gap-2 shadow-sm disabled:opacity-50"
             >
-              <span>{isSubmitting ? 'Authenticating...' : 'Sign In to Workspace'}</span>
+              <span>{isLoading ? 'Authenticating...' : 'Sign In to Workspace'}</span>
               <ArrowRight className="size-4" />
             </button>
           </form>
 
-          {/* Quick Demo Role Switcher */}
-          <div className="pt-4 border-t border-zinc-900 space-y-2">
-            <div className="text-[11px] font-mono text-zinc-500 text-center font-semibold">
-              DEMO ROLE SELECTOR
+          {switchDemoRole && (
+            <div className="pt-4 border-t border-zinc-900 space-y-2">
+              <div className="text-[11px] font-mono text-zinc-500 text-center font-semibold">
+                DEMO ROLE SELECTOR
+              </div>
+              <div className="grid grid-cols-3 gap-2">
+                <button
+                  type="button"
+                  onClick={() => handleQuickRole('Analyst')}
+                  className="p-2 rounded-md bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-[11px] font-mono text-zinc-300 transition-colors text-center"
+                >
+                  Analyst
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleQuickRole('TeamLead')}
+                  className="p-2 rounded-md bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-[11px] font-mono text-zinc-300 transition-colors text-center"
+                >
+                  Team Lead
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleQuickRole('Admin')}
+                  className="p-2 rounded-md bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-[11px] font-mono text-zinc-300 transition-colors text-center"
+                >
+                  Admin
+                </button>
+              </div>
             </div>
-            <div className="grid grid-cols-3 gap-2">
-              <button
-                type="button"
-                onClick={() => handleQuickRole('Analyst')}
-                className="p-2 rounded-md bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-[11px] font-mono text-zinc-300 transition-colors text-center"
-              >
-                Analyst
-              </button>
-              <button
-                type="button"
-                onClick={() => handleQuickRole('TeamLead')}
-                className="p-2 rounded-md bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-[11px] font-mono text-zinc-300 transition-colors text-center"
-              >
-                Team Lead
-              </button>
-              <button
-                type="button"
-                onClick={() => handleQuickRole('Admin')}
-                className="p-2 rounded-md bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-[11px] font-mono text-zinc-300 transition-colors text-center"
-              >
-                Admin
-              </button>
-            </div>
-          </div>
+          )}
         </div>
       </div>
     </div>

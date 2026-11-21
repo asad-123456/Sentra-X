@@ -20,7 +20,7 @@ const RAW_API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || '').trim();
 const API_BASE_URL = RAW_API_BASE_URL.replace(/\/+$/, '');
 
 export function isLiveBackendConfigured(): boolean {
-  return Boolean(API_BASE_URL && API_BASE_URL.length > 0);
+  return RAW_API_BASE_URL === '/' || API_BASE_URL.length > 0;
 }
 
 export function getApiBaseUrl(): string {
@@ -52,6 +52,13 @@ export async function apiClient<T>(
   });
 
   if (!response.ok) {
+    if (
+      response.status === 401 && token && headers.Authorization === `Bearer ${token}` &&
+      cleanEndpoint !== '/api/v1/auth/login' && !options.signal?.aborted && typeof window !== 'undefined'
+    ) {
+      window.dispatchEvent(new CustomEvent('sentrax:unauthorized', { detail: token }));
+    }
+
     let errorData: unknown;
     try {
       errorData = await response.json();
@@ -88,9 +95,6 @@ export async function apiClient<T>(
       }
     } else if (response.status === 401) {
       message = 'HTTP 401 Unauthorized: Invalid credentials or session expired.';
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(new CustomEvent('sentrax:unauthorized'));
-      }
     } else if (response.status === 403) {
       message = 'HTTP 403 Forbidden: Insufficient role permissions for this resource.';
     } else if (response.status === 422) {

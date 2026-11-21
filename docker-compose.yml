@@ -6,7 +6,7 @@ services:
       POSTGRES_USER: sentrax
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-sentrax}
     ports:
-      - "5432:5432"          # so pytest on your laptop can reach it
+      - "127.0.0.1:${SENTRAX_DB_PORT:-5432}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -19,7 +19,7 @@ services:
   backend:
     build: ./backend
     env_file:
-      - path: ./backend/.env       # optional: your local settings (never committed)
+      - path: ${SENTRAX_BACKEND_ENV_FILE:-./backend/.env}
         required: false
     environment:
       # these override the localhost URLs in backend/.env: inside compose the database host is "db"
@@ -31,7 +31,7 @@ services:
       db:
         condition: service_healthy
     ports:
-      - "8000:8000"          # Swagger (/docs) and the Wazuh webhook; lab use only
+      - "127.0.0.1:${SENTRAX_API_PORT:-8000}:8000"
     healthcheck:
       test: ["CMD", "python", "-c", "import json,sys,urllib.request; sys.exit(0 if json.load(urllib.request.urlopen('http://localhost:8000/api/health', timeout=3)).get('status') == 'HEALTHY' else 1)"]
       interval: 10s
@@ -48,7 +48,7 @@ services:
       backend:
         condition: service_healthy
     ports:
-      - "8443:443"
+      - "127.0.0.1:${SENTRAX_HTTPS_PORT:-8443}:443"
     healthcheck:
       test: ["CMD", "curl", "-fsk", "https://localhost/api/health"]
       interval: 15s

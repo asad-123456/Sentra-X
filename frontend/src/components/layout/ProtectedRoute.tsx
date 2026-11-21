@@ -56,27 +56,29 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
               </p>
 
               <div className="pt-4 border-t border-zinc-800/80 flex flex-wrap items-center justify-between gap-3">
-                <div className="flex items-center gap-2 text-xs text-zinc-400">
-                  <span>Switch Demo Role:</span>
-                  {allowedRoles.includes('TeamLead') && (
-                    <button
-                      type="button"
-                      onClick={() => switchDemoRole('TeamLead')}
-                      className="px-2.5 py-1 rounded bg-zinc-900 border border-zinc-700 hover:border-zinc-500 text-zinc-200 text-xs font-mono transition-colors"
-                    >
-                      Team Lead
-                    </button>
-                  )}
-                  {allowedRoles.includes('Admin') && (
-                    <button
-                      type="button"
-                      onClick={() => switchDemoRole('Admin')}
-                      className="px-2.5 py-1 rounded bg-zinc-900 border border-zinc-700 hover:border-zinc-500 text-zinc-200 text-xs font-mono transition-colors"
-                    >
-                      Admin
-                    </button>
-                  )}
-                </div>
+                {switchDemoRole && (
+                  <div className="flex items-center gap-2 text-xs text-zinc-400">
+                    <span>Switch Demo Role:</span>
+                    {allowedRoles.includes('TeamLead') && (
+                      <button
+                        type="button"
+                        onClick={() => switchDemoRole('TeamLead')}
+                        className="px-2.5 py-1 rounded bg-zinc-900 border border-zinc-700 hover:border-zinc-500 text-zinc-200 text-xs font-mono transition-colors"
+                      >
+                        Team Lead
+                      </button>
+                    )}
+                    {allowedRoles.includes('Admin') && (
+                      <button
+                        type="button"
+                        onClick={() => switchDemoRole('Admin')}
+                        className="px-2.5 py-1 rounded bg-zinc-900 border border-zinc-700 hover:border-zinc-500 text-zinc-200 text-xs font-mono transition-colors"
+                      >
+                        Admin
+                      </button>
+                    )}
+                  </div>
+                )}
 
                 <a
                   href="/queue"

@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
 import type { OverrideTrendPoint } from '../../types/sentrax';
-import { TrendingDown, Sparkles, BookmarkCheck } from 'lucide-react';
 
 interface OverrideTrendChartProps {
   data: OverrideTrendPoint[];
@@ -16,7 +15,7 @@ export const OverrideTrendChart: React.FC<OverrideTrendChartProps> = ({
   if (isLoading || !data || data.length === 0) {
     return (
       <div className="p-5 rounded-xl bg-zinc-950 border border-zinc-850 h-[380px] flex items-center justify-center text-zinc-500 font-mono text-xs">
-        Loading longitudinal trendline telemetry...
+        {isLoading ? 'Loading override trend…' : 'No closure decisions in this range.'}
       </div>
     );
   }
@@ -29,26 +28,26 @@ export const OverrideTrendChart: React.FC<OverrideTrendChartProps> = ({
   const chartHeight = svgHeight - padding.top - padding.bottom;
 
   // Max bounds
-  const maxRate = 25; // 0% to 25% on Y-left
-  const maxExemplars = Math.max(40, ...data.map((d) => d.exemplar_count));
+  const maxRate = 100;
+  const maxExemplars = Math.max(1, ...data.map((d) => d.exemplar_count));
 
+  const start = Date.parse(data[0].date);
+  const duration = Date.parse(data[data.length - 1].date) - start;
   const points = data.map((d, index) => {
-    const x = padding.left + (index / (data.length - 1)) * chartWidth;
-    const yRate = padding.top + chartHeight - (d.override_rate / maxRate) * chartHeight;
+    const position = duration ? (Date.parse(d.date) - start) / duration : 0.5;
+    const x = padding.left + position * chartWidth;
+    const yRate = d.override_rate === null ? null : padding.top + chartHeight - (d.override_rate / maxRate) * chartHeight;
     const yExemplar = padding.top + chartHeight - (d.exemplar_count / maxExemplars) * chartHeight;
     return { ...d, x, yRate, yExemplar, index };
   });
 
   // Construct SVG paths
-  const ratePath = points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.yRate}`).join(' ');
-  const areaPath = `${ratePath} L ${points[points.length - 1].x} ${padding.top + chartHeight} L ${points[0].x} ${padding.top + chartHeight} Z`;
+  const ratePath = points.map((point, index) => {
+    if (point.yRate === null) return '';
+    const command = index > 0 && points[index - 1].yRate !== null ? 'L' : 'M';
+    return `${command} ${point.x} ${point.yRate}`;
+  }).join(' ');
   const exemplarPath = points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.yExemplar}`).join(' ');
-
-  // Calculate improvement delta
-  const initialRate = data[0]?.override_rate || 0;
-  const latestRate = data[data.length - 1]?.override_rate || 0;
-  const relativeReduction =
-    initialRate > 0 ? (((initialRate - latestRate) / initialRate) * 100).toFixed(1) : '0';
 
   const hoveredPoint = hoveredIndex !== null ? points[hoveredIndex] : null;
 
@@ -59,15 +58,11 @@ export const OverrideTrendChart: React.FC<OverrideTrendChartProps> = ({
         <div className="space-y-0.5">
           <div className="flex items-center gap-2">
             <span className="text-xs font-mono font-bold text-zinc-100 uppercase tracking-wider">
-              Longitudinal Override Rate &amp; Calibration Impact
-            </span>
-            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono bg-cyan-950 text-cyan-300 border border-cyan-800/80">
-              <Sparkles className="size-2.5 text-cyan-400" />
-              <span>Few-Shot Effect</span>
+              Daily Override Rate
             </span>
           </div>
           <p className="text-xs text-zinc-400 font-sans">
-            Tracking reduction in repeat human overrides as dynamic few-shot exemplars accumulate
+            Override rate among approvals and overrides, with cumulative exemplar creation.
           </p>
         </div>
 
@@ -79,7 +74,7 @@ export const OverrideTrendChart: React.FC<OverrideTrendChartProps> = ({
           </div>
           <div className="flex items-center gap-1.5">
             <span className="w-3.5 h-0.5 border-t-2 border-dashed border-emerald-400" />
-            <span className="text-zinc-400">Active Exemplars</span>
+            <span className="text-zinc-400">Exemplars Created</span>
           </div>
         </div>
       </div>
@@ -90,16 +85,8 @@ export const OverrideTrendChart: React.FC<OverrideTrendChartProps> = ({
           viewBox={`0 0 ${svgWidth} ${svgHeight}`}
           className="w-full h-auto overflow-visible font-mono"
         >
-          <defs>
-            {/* Area gradient for override rate */}
-            <linearGradient id="rateGradient" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor="#06b6d4" stopOpacity="0.25" />
-              <stop offset="100%" stopColor="#06b6d4" stopOpacity="0.0" />
-            </linearGradient>
-          </defs>
-
           {/* Grid lines & Y-axis labels */}
-          {[0, 5, 10, 15, 20, 25].map((val) => {
+          {[0, 25, 50, 75, 100].map((val) => {
             const y = padding.top + chartHeight - (val / maxRate) * chartHeight;
             return (
               <g key={val}>
@@ -124,9 +111,6 @@ export const OverrideTrendChart: React.FC<OverrideTrendChartProps> = ({
               </g>
             );
           })}
-
-          {/* Area fill */}
-          <path d={areaPath} fill="url(#rateGradient)" />
 
           {/* Exemplar line (dashed emerald) */}
           <path
@@ -184,14 +168,14 @@ export const OverrideTrendChart: React.FC<OverrideTrendChartProps> = ({
                 />
 
                 {/* Rate point */}
-                <circle
+                {p.yRate !== null && <circle
                   cx={p.x}
                   cy={p.yRate}
                   r={isHovered ? 6 : 4}
                   fill={isHovered ? '#06b6d4' : '#09090b'}
                   stroke="#06b6d4"
                   strokeWidth="2"
-                />
+                />}
 
                 {/* X-axis date label */}
                 <text
@@ -202,7 +186,7 @@ export const OverrideTrendChart: React.FC<OverrideTrendChartProps> = ({
                   fill={isHovered ? '#f4f4f5' : '#71717a'}
                   fontWeight={isHovered ? 'bold' : 'normal'}
                 >
-                  {p.date.slice(5)}
+                  {(p.index % Math.ceil(points.length / 8) === 0 || p.index === points.length - 1) && p.date.slice(5)}
                 </text>
               </g>
             );
@@ -215,7 +199,7 @@ export const OverrideTrendChart: React.FC<OverrideTrendChartProps> = ({
             className="absolute z-10 pointer-events-none p-2.5 rounded-lg bg-zinc-900 border border-zinc-700 shadow-xl text-xs font-mono space-y-1"
             style={{
               left: `${(hoveredPoint.x / svgWidth) * 100}%`,
-              top: `${Math.max(10, (hoveredPoint.yRate / svgHeight) * 100 - 35)}%`,
+              top: `${Math.max(10, ((hoveredPoint.yRate ?? hoveredPoint.yExemplar) / svgHeight) * 100 - 35)}%`,
               transform: 'translate(-50%, -100%)',
             }}
           >
@@ -224,55 +208,24 @@ export const OverrideTrendChart: React.FC<OverrideTrendChartProps> = ({
             </div>
             <div className="flex items-center justify-between gap-4">
               <span className="text-zinc-400">Override Rate:</span>
-              <span className="text-cyan-300 font-bold">{hoveredPoint.override_rate.toFixed(1)}%</span>
+              <span className="text-cyan-300 font-bold">
+                {hoveredPoint.override_rate === null ? '—' : `${hoveredPoint.override_rate.toFixed(1)}%`}
+              </span>
             </div>
             <div className="flex items-center justify-between gap-4">
               <span className="text-zinc-400">Overrides:</span>
               <span className="text-zinc-200">
-                {hoveredPoint.override_count} / {hoveredPoint.total_closed} closed
+                {hoveredPoint.override_count} / {hoveredPoint.total_decisions ?? hoveredPoint.total_closed} decisions
               </span>
             </div>
             <div className="flex items-center justify-between gap-4">
-              <span className="text-zinc-400">Active Exemplars:</span>
+              <span className="text-zinc-400">Exemplars Created:</span>
               <span className="text-emerald-400 font-bold">{hoveredPoint.exemplar_count}</span>
             </div>
           </div>
         )}
       </div>
 
-      {/* Metric Callout Footer Strip */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-3 border-t border-zinc-900 text-xs font-mono">
-        <div className="p-2.5 rounded-lg bg-zinc-900/60 border border-zinc-850">
-          <span className="text-[10px] text-zinc-500 uppercase">Initial Override Rate</span>
-          <div className="text-base font-bold text-zinc-300 pt-0.5">{initialRate.toFixed(1)}%</div>
-          <span className="text-[10px] text-zinc-500 font-sans">Prior to exemplar seeding</span>
-        </div>
-
-        <div className="p-2.5 rounded-lg bg-zinc-900/60 border border-zinc-850">
-          <span className="text-[10px] text-zinc-500 uppercase">Current Override Rate</span>
-          <div className="text-base font-bold text-cyan-400 pt-0.5">{latestRate.toFixed(1)}%</div>
-          <span className="text-[10px] text-zinc-500 font-sans">Active production triage</span>
-        </div>
-
-        <div className="p-2.5 rounded-lg bg-zinc-900/60 border border-zinc-850">
-          <span className="text-[10px] text-zinc-500 uppercase">Relative Reduction</span>
-          <div className="text-base font-bold text-emerald-400 pt-0.5 flex items-center gap-1">
-            <TrendingDown className="size-4" />
-            <span>-{relativeReduction}%</span>
-          </div>
-          <span className="text-[10px] text-zinc-500 font-sans">Repeat override prevention</span>
-        </div>
-
-        <div className="p-2.5 rounded-lg bg-zinc-900/60 border border-zinc-850">
-          <span className="text-[10px] text-zinc-500 uppercase">Cumulative Exemplars</span>
-          <div className="text-base font-bold text-emerald-300 pt-0.5 flex items-center gap-1">
-            <BookmarkCheck className="size-4 text-emerald-400" />
-            <span>{data[data.length - 1]?.exemplar_count || 0}</span>
-          </div>
-          <span className="text-[10px] text-zinc-500 font-sans">Indexed prompt exemplars</span>
-        </div>
-      </div>
     </div>
   );
 };
-

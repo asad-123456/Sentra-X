@@ -1,11 +1,13 @@
-import React, { useEffect, useState, useTransition } from 'react';
-import type { AlertListItem, QueueTab, GuardrailFilter, QueueCounts } from '../types/sentrax';
+import React, { useEffect, useMemo, useState, useTransition } from 'react';
+import { useOutletContext } from 'react-router-dom';
+import type { AlertListItem, PaginatedResult, QueueFilters, QueueTab, GuardrailFilter, QueueCounts } from '../types/sentrax';
 import { getAlerts, getQueueCounts, quickApprove } from '../api/services';
 import { useAuth } from '../context/AuthContext';
 import { QueueFilterBar } from '../components/queue/QueueFilterBar';
 import { TriageQueueTable } from '../components/queue/TriageQueueTable';
 import { AlertDetailModal } from '../components/modal/AlertDetailModal';
 import {
+  AlertCircle,
   Inbox,
   ShieldAlert,
   Clock,
@@ -18,6 +20,7 @@ import {
 
 export const TriageQueueView: React.FC = () => {
   const { user } = useAuth();
+  const setActionableCount = useOutletContext<(count: number) => void>();
   const [, startTransition] = useTransition();
 
   // Filter States
@@ -32,12 +35,13 @@ export const TriageQueueView: React.FC = () => {
   // Pagination State
   const [page, setPage] = useState<number>(1);
   const [pageSize, setPageSize] = useState<number>(5);
-  const [total, setTotal] = useState<number>(0);
-  const [totalPages, setTotalPages] = useState<number>(1);
 
-  // Data States
-  const [alerts, setAlerts] = useState<AlertListItem[]>([]);
-  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [refreshVersion, setRefreshVersion] = useState(0);
+  const [queueResult, setQueueResult] = useState<{
+    key: string;
+    data?: PaginatedResult<AlertListItem>;
+    error?: string;
+  } | null>(null);
   const [counts, setCounts] = useState<QueueCounts>({
     awaiting: 0,
     escalated: 0,
@@ -49,7 +53,7 @@ export const TriageQueueView: React.FC = () => {
   });
 
   // Feedback Toast State
-  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [notice, setNotice] = useState<{ message: string; failed?: boolean } | null>(null);
 
   // Selected Alert for inspection modal
   const [selectedAlertId, setSelectedAlertId] = useState<string | null>(null);
@@ -63,56 +67,61 @@ export const TriageQueueView: React.FC = () => {
     assetTier !== 'ALL' ||
     subStatus !== 'ALL';
 
-  // Load Queue Counts
-  // Initial load and dependency triggers
-  useEffect(() => {
-    let isCancelled = false;
-    getQueueCounts()
-      .then((updatedCounts) => {
-        if (!isCancelled) {
-          setCounts(updatedCounts);
-        }
-      })
-      .catch((err) => {
-        console.error('Failed to load queue counts:', err);
-      });
-    return () => {
-      isCancelled = true;
-    };
-  }, []);
+  const filters = useMemo<QueueFilters>(() => ({
+    tab: currentTab,
+    subStatus,
+    severity,
+    guardrail,
+    assetTier,
+    search: search.trim(),
+    ruleId: ruleId.trim(),
+    page,
+    pageSize,
+  }), [currentTab, subStatus, severity, guardrail, assetTier, search, ruleId, page, pageSize]);
+  const requestKey = JSON.stringify([filters, refreshVersion]);
+  const activeResult = queueResult?.key === requestKey ? queueResult : null;
+  const alerts = activeResult?.data?.items ?? [];
+  const total = activeResult?.data?.total ?? 0;
+  const totalPages = activeResult?.data?.totalPages ?? 1;
+  const isLoading = activeResult === null;
 
   useEffect(() => {
-    let isCancelled = false;
-    getAlerts({
-      tab: currentTab,
-      subStatus: subStatus === 'ALL' ? undefined : subStatus,
-      severity: severity === 'ALL' ? undefined : severity,
-      guardrail: guardrail === 'ALL' ? undefined : guardrail,
-      assetTier: assetTier === 'ALL' ? undefined : assetTier,
-      search: search.trim() === '' ? undefined : search.trim(),
-      ruleId: ruleId.trim() === '' ? undefined : ruleId.trim(),
-      page,
-      pageSize,
-    })
-      .then((res) => {
-        if (!isCancelled) {
-          setAlerts(res.items);
-          setTotal(res.total);
-          setTotalPages(res.totalPages);
-          setIsLoading(false);
-        }
-      })
-      .catch((err) => {
-        if (!isCancelled) {
-          console.error('Failed to fetch alerts:', err);
-          setIsLoading(false);
-        }
-      });
+    const controller = new AbortController();
+    const { signal } = controller;
+    getQueueCounts(signal).then((updatedCounts) => {
+      if (!signal.aborted) {
+        setCounts(updatedCounts);
+        setActionableCount(updatedCounts.awaiting);
+      }
+    }).catch((error) => {
+      if (!signal.aborted) console.error('Failed to load queue counts:', error);
+    });
+    return () => controller.abort();
+  }, [refreshVersion, setActionableCount]);
 
-    return () => {
-      isCancelled = true;
-    };
-  }, [currentTab, subStatus, severity, guardrail, assetTier, search, ruleId, page, pageSize]);
+  useEffect(() => {
+    const controller = new AbortController();
+    const { signal } = controller;
+    getAlerts(filters, signal).then((data) => {
+      if (signal.aborted) return;
+      if (filters.page > data.totalPages) {
+        setPage(data.totalPages);
+      } else {
+        setQueueResult({ key: requestKey, data });
+      }
+    }).catch((error: unknown) => {
+      if (!signal.aborted) {
+        setQueueResult({ key: requestKey, error: error instanceof Error ? error.message : 'Could not load alerts.' });
+      }
+    });
+    return () => controller.abort();
+  }, [filters, requestKey]);
+
+  useEffect(() => {
+    if (!notice || notice.failed) return;
+    const timer = setTimeout(() => setNotice(null), 4500);
+    return () => clearTimeout(timer);
+  }, [notice]);
 
   // Reset page to 1 when filters change
   const handleTabChange = (tab: QueueTab) => {
@@ -162,79 +171,25 @@ export const TriageQueueView: React.FC = () => {
     });
   };
 
-  // Inline Quick Approve Handler
+  const refreshQueue = () => setRefreshVersion((version) => version + 1);
+
+  const handleDecisionCommitted = (message: string) => {
+    setNotice({ message });
+    refreshQueue();
+  };
+
   const handleQuickApprove = async (alertId: string) => {
     if (!user) return;
     try {
       const audit = await quickApprove(alertId, user);
-      const targetAlert = alerts.find((a) => a.id === alertId);
-      setToastMessage(
-        `Approved ${targetAlert?.rule_description || 'alert'} (Audit #${audit.id.slice(-6)}). Action logged to immutable audit trail.`
-      );
-
-      // Refresh list and counter
-      const [res, updatedCounts] = await Promise.all([
-        getAlerts({
-          tab: currentTab,
-          subStatus: subStatus === 'ALL' ? undefined : subStatus,
-          severity: severity === 'ALL' ? undefined : severity,
-          guardrail: guardrail === 'ALL' ? undefined : guardrail,
-          assetTier: assetTier === 'ALL' ? undefined : assetTier,
-          search: search.trim() === '' ? undefined : search.trim(),
-          ruleId: ruleId.trim() === '' ? undefined : ruleId.trim(),
-          page,
-          pageSize,
-        }),
-        getQueueCounts(),
-      ]);
-
-      setAlerts(res.items);
-      setTotal(res.total);
-      setTotalPages(res.totalPages);
-      setCounts(updatedCounts);
-
-      // Auto dismiss toast after 4.5 seconds
-      setTimeout(() => {
-        setToastMessage(null);
-      }, 4500);
-    } catch (err) {
-      console.error('Error approving alert:', err);
+      handleDecisionCommitted(`Alert approved. Audit #${audit.id.slice(-6)}.`);
+    } catch (error: unknown) {
+      setNotice({
+        message: error instanceof Error ? error.message : 'The alert could not be approved.',
+        failed: true,
+      });
+      refreshQueue();
     }
-  };
-
-  // Row selection handler
-  const handleSelectAlert = (alertId: string) => {
-    setSelectedAlertId(alertId);
-  };
-
-  // Decision committed handler from modal
-  const handleDecisionCommitted = async (message: string) => {
-    setToastMessage(message);
-    setSelectedAlertId(null);
-
-    // Refresh queue and counters
-    const [res, updatedCounts] = await Promise.all([
-      getAlerts({
-        tab: currentTab,
-        subStatus: subStatus === 'ALL' ? undefined : subStatus,
-        severity: severity === 'ALL' ? undefined : severity,
-        guardrail: guardrail === 'ALL' ? undefined : guardrail,
-        assetTier: assetTier === 'ALL' ? undefined : assetTier,
-        search: search.trim() === '' ? undefined : search.trim(),
-        page,
-        pageSize,
-      }),
-      getQueueCounts(),
-    ]);
-
-    setAlerts(res.items);
-    setTotal(res.total);
-    setTotalPages(res.totalPages);
-    setCounts(updatedCounts);
-
-    setTimeout(() => {
-      setToastMessage(null);
-    }, 4500);
   };
 
   // Calculate item range for pagination label
@@ -300,39 +255,41 @@ export const TriageQueueView: React.FC = () => {
         {/* Mean Triage Latency */}
         <div className="p-4 rounded-xl bg-zinc-950 border border-zinc-800 space-y-1 shadow-sm">
           <div className="flex items-center justify-between text-zinc-400 text-xs font-mono">
-            <span>MEAN TRIAGE LATENCY</span>
+            <span>MEAN INFERENCE LATENCY</span>
             <Zap className="size-4 text-emerald-400" />
           </div>
-          <div className="text-2xl font-bold font-mono text-emerald-300">4.2s</div>
-          <div className="text-[11px] text-zinc-500 font-mono">Target &lt;= 8.0s per alert</div>
+          <div className="text-2xl font-bold font-mono text-emerald-300">
+            {counts.meanLatencySeconds == null ? '—' : `${counts.meanLatencySeconds.toFixed(2)}s`}
+          </div>
+          <div className="text-[11px] text-zinc-500 font-mono">Recorded model call latency</div>
         </div>
       </div>
 
-      {/* Action Notification Banner */}
-      {toastMessage && (
-        <div className="flex items-center justify-between gap-3 p-3 rounded-lg bg-emerald-950/60 border border-emerald-800/80 text-emerald-200 text-xs font-mono shadow-sm transition-all animate-in fade-in slide-in-from-top-2">
+      {notice && (
+        <div
+          role={notice.failed ? 'alert' : 'status'}
+          className={`flex items-center justify-between gap-3 rounded-lg border p-3 text-xs font-mono ${
+            notice.failed ? 'bg-red-950/60 border-red-800 text-red-200' : 'bg-emerald-950/60 border-emerald-800 text-emerald-200'
+          }`}
+        >
           <div className="flex items-center gap-2">
-            <CheckCircle2 className="size-4 text-emerald-400 shrink-0" />
-            <span>{toastMessage}</span>
+            {notice.failed ? <AlertCircle className="size-4 shrink-0" /> : <CheckCircle2 className="size-4 shrink-0" />}
+            <span>{notice.message}</span>
           </div>
-          <button
-            type="button"
-            onClick={() => setToastMessage(null)}
-            className="text-emerald-400 hover:text-emerald-200 p-0.5 rounded"
-            title="Dismiss notice"
-          >
+          <button type="button" onClick={() => setNotice(null)} className="p-1" aria-label="Dismiss notice">
             <X className="size-3.5" />
           </button>
         </div>
       )}
 
-      {/* Split-Pane Alert Detail Modal */}
-      <AlertDetailModal
-        isOpen={Boolean(selectedAlertId)}
-        alertId={selectedAlertId}
-        onClose={() => setSelectedAlertId(null)}
-        onDecisionCommitted={handleDecisionCommitted}
-      />
+      {selectedAlertId && (
+        <AlertDetailModal
+          key={selectedAlertId}
+          alertId={selectedAlertId}
+          onClose={() => setSelectedAlertId(null)}
+          onDecisionCommitted={handleDecisionCommitted}
+        />
+      )}
 
       {/* Filter and Queue Navigation Controls */}
       <QueueFilterBar
@@ -358,15 +315,23 @@ export const TriageQueueView: React.FC = () => {
         hasActiveFilters={hasActiveFilters}
       />
 
-      {/* Prioritized Queue Table */}
-      <TriageQueueTable
-        alerts={alerts}
-        isLoading={isLoading}
-        onSelectAlert={handleSelectAlert}
-        onQuickApprove={handleQuickApprove}
-        hasActiveFilters={hasActiveFilters}
-        onResetFilters={handleResetFilters}
-      />
+      {activeResult?.error ? (
+        <div role="alert" className="flex items-center justify-between gap-3 rounded-lg border border-red-800 bg-red-950/50 p-3 text-sm text-red-200">
+          <span>{activeResult.error}</span>
+          <button type="button" onClick={refreshQueue} className="shrink-0 rounded border border-red-700 px-3 py-1">
+            Retry queue
+          </button>
+        </div>
+      ) : (
+        <TriageQueueTable
+          alerts={alerts}
+          isLoading={isLoading}
+          onSelectAlert={setSelectedAlertId}
+          onQuickApprove={handleQuickApprove}
+          hasActiveFilters={hasActiveFilters}
+          onResetFilters={handleResetFilters}
+        />
+      )}
 
       {/* Pagination Bar */}
       <div className="flex flex-wrap items-center justify-between gap-3 text-xs font-mono text-zinc-400 border-t border-zinc-900 pt-3">

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import logging
-import re
 import secrets
 import uuid
 from datetime import datetime, timezone
@@ -18,6 +17,7 @@ from ..config import settings
 from ..database import get_db
 from ..models.system_configuration import SystemConfiguration
 from ..models.user import User
+from ..schemas.auth import ACCOUNT_USERNAME_PATTERN, is_valid_account_email
 from ..security_log import security_log
 from ..utils import parse_uuid
 
@@ -148,12 +148,12 @@ def create_user(
             detail=f"HTTP 422: Invalid role '{role}'. Must be one of: 'Analyst', 'TeamLead', 'Admin'.",
         )
 
-    if not re.fullmatch(r"[A-Za-z0-9._-]{3,64}", username):
+    if not ACCOUNT_USERNAME_PATTERN.fullmatch(username):
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="HTTP 422: Username must be 3-64 characters (letters, digits, '.', '_' or '-').",
         )
-    if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email) or len(email) > 255:
+    if not is_valid_account_email(email):
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="HTTP 422: Invalid email address.")
 
     # The admin UI has no password field: use DEFAULT_NEW_USER_PASSWORD if configured, otherwise generate a random
@@ -254,7 +254,6 @@ def _save_system_config(payload: Dict[str, Any], db: Optional[Session] = None) -
     for k, v in payload.items():
         if k in DEFAULT_SYSTEM_CONFIG:
             current[k] = v
-            SYSTEM_CONFIG[k] = v
 
     if db:
         try:
@@ -280,10 +279,6 @@ def _save_system_config(payload: Dict[str, Any], db: Optional[Session] = None) -
         pass
 
     return current
-
-
-# Module-level alias for backward compatibility
-SYSTEM_CONFIG = _load_system_config()
 
 
 @router.get("/config", response_model=Dict[str, Any])

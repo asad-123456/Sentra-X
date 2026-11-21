@@ -14,15 +14,19 @@ import {
 interface EvidenceTreePaneProps {
   evidencePack: EvidencePack;
   citedEvidenceKeys: string[];
-  selectedCitationKey: string | null;
+  citation: { key: string } | null;
 }
 
 type EvidenceTab = 'tree' | 'raw_json' | 'prompt_envelope';
 
+function includesPath(parent: string, path: string): boolean {
+  return path === parent || path.startsWith(`${parent}.`) || path.startsWith(`${parent}[`);
+}
+
 export const EvidenceTreePane: React.FC<EvidenceTreePaneProps> = ({
   evidencePack,
   citedEvidenceKeys,
-  selectedCitationKey,
+  citation,
 }) => {
   const [activeTab, setActiveTab] = useState<EvidenceTab>('tree');
   const [copiedRaw, setCopiedRaw] = useState(false);
@@ -31,24 +35,23 @@ export const EvidenceTreePane: React.FC<EvidenceTreePaneProps> = ({
 
   const containerRef = useRef<HTMLDivElement>(null);
 
-  // Auto-switch to tree tab and scroll to element when selectedCitationKey is clicked
   useEffect(() => {
-    if (!selectedCitationKey) return;
+    if (!citation) return;
 
-    // Slight delay to allow DOM transition
-    const timeout = setTimeout(() => {
+    const frame = requestAnimationFrame(() => {
       setActiveTab('tree');
-      if (!containerRef.current) return;
-      const targetElement = containerRef.current.querySelector(
-        `[data-dot-key="${CSS.escape(selectedCitationKey)}"]`
-      );
-      if (targetElement) {
-        targetElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      }
-    }, 50);
+      setCollapsedNodes((nodes) => Object.fromEntries(
+        Object.entries(nodes).filter(([path]) => !includesPath(path, citation.key)),
+      ));
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [citation]);
 
-    return () => clearTimeout(timeout);
-  }, [selectedCitationKey]);
+  useEffect(() => {
+    if (!citation || activeTab !== 'tree') return;
+    const target = containerRef.current?.querySelector<HTMLElement>(`[data-dot-key="${CSS.escape(citation.key)}"]`);
+    target?.scrollIntoView({ block: 'center' });
+  }, [citation, activeTab, collapsedNodes]);
 
   const toggleCollapse = (path: string) => {
     setCollapsedNodes((prev) => ({
@@ -96,13 +99,8 @@ export const EvidenceTreePane: React.FC<EvidenceTreePaneProps> = ({
       isArray && value.every((v) => v === null || typeof v !== 'object');
     const isContainer = isObject && !isArrayOfPrimitives;
 
-    const isCited = citedEvidenceKeys.some(
-      (k) =>
-        k === currentPath ||
-        k.startsWith(currentPath + '.') ||
-        k.startsWith(currentPath + '[')
-    );
-    const isSelected = selectedCitationKey === currentPath;
+    const isCited = citedEvidenceKeys.some((key) => includesPath(currentPath, key));
+    const isSelected = citation?.key === currentPath;
     const isCollapsed = Boolean(collapsedNodes[currentPath]);
 
     if (isContainer) {
@@ -112,10 +110,13 @@ export const EvidenceTreePane: React.FC<EvidenceTreePaneProps> = ({
 
       return (
         <div key={currentPath} className="space-y-1">
-          <div
+          <button
+            type="button"
             data-dot-key={currentPath}
+            data-selected-citation={isSelected || undefined}
+            aria-expanded={!isCollapsed}
             onClick={() => toggleCollapse(currentPath)}
-            className={`flex items-center gap-1.5 py-1 px-2 rounded-md hover:bg-zinc-900/60 cursor-pointer text-xs font-mono select-none transition-colors ${
+            className={`flex max-w-full items-center gap-1.5 py-1 px-2 rounded-md hover:bg-zinc-900/60 cursor-pointer text-xs font-mono select-none transition-colors ${
               isSelected
                 ? 'bg-cyan-950/50 ring-1 ring-cyan-400 border-l-2 border-l-cyan-400 pl-1.5'
                 : isCited
@@ -140,7 +141,7 @@ export const EvidenceTreePane: React.FC<EvidenceTreePaneProps> = ({
                 <span>CITED BY AI</span>
               </span>
             )}
-          </div>
+          </button>
 
           {!isCollapsed && (
             <div className="space-y-1">
@@ -172,6 +173,7 @@ export const EvidenceTreePane: React.FC<EvidenceTreePaneProps> = ({
       <div
         key={currentPath}
         data-dot-key={currentPath}
+        data-selected-citation={isSelected || undefined}
         className={`flex flex-col sm:flex-row sm:items-baseline justify-between gap-2 py-1.5 px-2.5 rounded-lg text-xs font-mono transition-all ${
           isSelected
             ? 'bg-cyan-950/60 border border-cyan-500 shadow-[0_0_12px_rgba(6,182,212,0.25)] ring-1 ring-cyan-400'
@@ -211,10 +213,17 @@ export const EvidenceTreePane: React.FC<EvidenceTreePaneProps> = ({
     );
   };
 
+  const tree = evidencePack.pack_json ?? {
+    alert_metadata: evidencePack.alert_metadata,
+    asset_context: evidencePack.asset_context,
+    telemetry_payload: evidencePack.telemetry_payload,
+    temporal_context: evidencePack.temporal_context,
+  };
+
   return (
     <div className="h-full flex flex-col min-h-0 bg-zinc-950 border-l border-zinc-800/80 text-zinc-100 text-xs overflow-hidden">
       {/* 3 Sub-Tabs Header */}
-      <div className="h-12 border-b border-zinc-800/80 bg-zinc-900/50 px-4 flex items-center justify-between gap-3 shrink-0">
+      <div className="min-h-12 border-b border-zinc-800/80 bg-zinc-900/50 px-3 py-1 flex items-center justify-between gap-2 shrink-0 overflow-x-auto">
         <div className="flex items-center gap-1.5 p-1 bg-zinc-950 rounded-lg border border-zinc-800/80">
           <button
             type="button"
@@ -313,12 +322,7 @@ export const EvidenceTreePane: React.FC<EvidenceTreePaneProps> = ({
 
             {/* Tree Sections */}
             <div className="space-y-3">
-              {renderTreeNode('alert_metadata', evidencePack.alert_metadata, 'alert_metadata')}
-              {renderTreeNode('asset_context', evidencePack.asset_context, 'asset_context')}
-              {renderTreeNode('telemetry_payload', evidencePack.telemetry_payload, 'telemetry_payload')}
-              {evidencePack.temporal_context && evidencePack.temporal_context.length > 0 && (
-                renderTreeNode('temporal_context', evidencePack.temporal_context, 'temporal_context')
-              )}
+              {Object.entries(tree).map(([key, value]) => renderTreeNode(key, value, key))}
             </div>
           </div>
         )}

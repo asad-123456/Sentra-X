@@ -4,7 +4,7 @@ For each alert id taken from triage_queue:
   1. short transaction: load_triage_inputs (tier, correlated alerts, exemplars), then commit
   2. run_triage_pipeline: no database connection is held during the slow LLM call
   3. new transaction: persist_outcome saves the pack and assessment and sets the status, then commit
-Any failure sends the alert to NEEDS_MANUAL_TRIAGE, so nothing stays stuck in PENDING_REVIEW.
+Failures send the current attempt to NEEDS_MANUAL_TRIAGE.
 A sweeper thread re-queues PENDING_REVIEW alerts that never reached a worker (the queue is
 in memory, so a restart loses it).
 
@@ -35,13 +35,13 @@ logger = logging.getLogger(__name__)
 MAX_WORKERS = 12
 SWEEP_BATCH = 500
 
-_SQL_STATUS = text("SELECT status FROM alerts WHERE id = CAST(:id AS uuid)")
+_SQL_ATTEMPT = text("SELECT status, triage_generation FROM alerts WHERE id = CAST(:id AS uuid)")
 _SQL_PENDING = text(
     "SELECT id FROM alerts WHERE status = 'PENDING_REVIEW' ORDER BY ingested_at LIMIT :n"
 )
 _SQL_MANUAL = text("""
     UPDATE alerts SET status = 'NEEDS_MANUAL_TRIAGE', updated_at = now()
-    WHERE id = CAST(:id AS uuid) AND status = 'PENDING_REVIEW'
+    WHERE id = CAST(:id AS uuid) AND status = 'PENDING_REVIEW' AND triage_generation = :generation
 """)
 
 
@@ -72,13 +72,15 @@ def build_adapter(settings: Optional[WorkerSettings] = None) -> LLMAdapter:
     )
 
 
-def _to_manual_triage(alert_id: UUID, session_factory: Any) -> None:
+def _to_manual_triage(alert_id: UUID, generation: int, session_factory: Any) -> str | None:
     try:
         with session_factory() as s:
-            s.execute(_SQL_MANUAL, {"id": str(alert_id)})
+            moved = s.execute(_SQL_MANUAL, {"id": str(alert_id), "generation": generation}).rowcount
             s.commit()
+        return STATUS_NEEDS_MANUAL_TRIAGE if moved else None
     except Exception:
         logger.exception("Could not move alert %s to manual triage", alert_id)
+        return None
 
 
 def process_alert(
@@ -89,25 +91,28 @@ def process_alert(
     tier_lookup: Any = get_asset_tier,
     exemplar_lookup: Any = find_exemplars,
 ) -> Optional[str]:
-    """Triage one alert. Returns the status it was moved to, or None if the alert was
-    not PENDING_REVIEW (a duplicate queue entry, or a human got there first). Never raises."""
+    """Triage one alert. Return the committed status, or None if no status changed."""
+    generation = None
     try:
         with session_factory() as s:
-            if s.execute(_SQL_STATUS, {"id": str(alert_id)}).scalar() != STATUS_PENDING_REVIEW:
+            attempt = s.execute(_SQL_ATTEMPT, {"id": str(alert_id)}).first()
+            if attempt is None or attempt.status != STATUS_PENDING_REVIEW:
                 return None
+            generation = attempt.triage_generation
             inputs = load_triage_inputs(
                 s, alert_id, tier_lookup=tier_lookup, exemplar_lookup=exemplar_lookup
             )
             s.commit()              # keeps the exemplar hit counts
         outcome = run_triage_pipeline(inputs, adapter)
         with session_factory() as s:
-            status = persist_outcome(s, alert_id, outcome)
+            status = persist_outcome(s, alert_id, outcome, expected_generation=generation)
             s.commit()
         return status
     except Exception:
-        logger.exception("Triage failed for alert %s; sending it to manual triage", alert_id)
-        _to_manual_triage(alert_id, session_factory)
-        return STATUS_NEEDS_MANUAL_TRIAGE
+        logger.exception("Triage failed for alert %s", alert_id)
+        if generation is not None:
+            return _to_manual_triage(alert_id, generation, session_factory)
+        return None
 
 
 class TriageWorker:

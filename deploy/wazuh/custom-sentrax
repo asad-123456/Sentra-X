@@ -1,0 +1,62 @@
+#!/usr/bin/env python3
+"""Send the Integrator's JSON file to the Sentra-X lab using verified TLS."""
+import hashlib
+import hmac
+import http.client
+from pathlib import Path
+import ssl
+import sys
+import time
+from urllib.parse import urlsplit
+
+CA_FILE = "/var/ossec/etc/sentrax-ca.pem"
+SECRET_FILE = Path("/var/ossec/etc/sentrax-webhook.secret")
+WEBHOOK_PATH = "/api/webhooks/wazuh"
+MAX_ALERT_BYTES = 1024 * 1024
+
+
+def main():
+    # Wazuh passes the alert path, API-key argument, and webhook URL in that order.
+    if len(sys.argv) < 4:
+        raise SystemExit("Sentra-X: expected an alert file and webhook URL")
+    url = urlsplit(sys.argv[3])
+    if (url.scheme != "https" or not url.hostname or url.username or url.password
+            or url.path != WEBHOOK_PATH or url.query or url.fragment):
+        raise SystemExit("Sentra-X: invalid HTTPS webhook URL")
+    with open(sys.argv[1], "rb") as alert_file:
+        payload = alert_file.read(MAX_ALERT_BYTES + 1)
+    if not payload or len(payload) > MAX_ALERT_BYTES:
+        raise SystemExit("Sentra-X: empty or oversized alert")
+    secret = SECRET_FILE.read_bytes().strip()
+    if not secret:
+        raise SystemExit("Sentra-X: signing secret is empty")
+    context = ssl.create_default_context(cafile=CA_FILE)
+    headers = {
+        "Content-Type": "application/json",
+        "X-Sentrax-Signature": "sha256=" + hmac.new(secret, payload, hashlib.sha256).hexdigest(),
+    }
+
+    for retry_delay in (1, 2, None):
+        connection = http.client.HTTPSConnection(url.hostname, url.port, timeout=5, context=context)
+        try:
+            connection.request("POST", WEBHOOK_PATH, body=payload, headers=headers)
+            with connection.getresponse() as response:
+                if response.status == 200:
+                    return
+                status = response.status
+                failure = "HTTP " + str(status)
+                if status not in (408, 429) and status < 500:
+                    raise SystemExit("Sentra-X delivery rejected with " + failure)
+        except ssl.SSLCertVerificationError:
+            raise SystemExit("Sentra-X: server certificate verification failed") from None
+        except (OSError, http.client.HTTPException) as exc:
+            failure = type(exc).__name__
+        finally:
+            connection.close()
+        if retry_delay is not None:
+            time.sleep(retry_delay)
+    raise SystemExit("Sentra-X delivery failed after three attempts: " + failure)
+
+
+if __name__ == "__main__":
+    main()

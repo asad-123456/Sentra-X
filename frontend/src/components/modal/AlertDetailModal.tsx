@@ -16,56 +16,41 @@ import {
 } from 'lucide-react';
 
 interface AlertDetailModalProps {
-  isOpen: boolean;
-  alertId: string | null;
+  alertId: string;
   onClose: () => void;
   onDecisionCommitted: (message: string) => void;
 }
 
 export const AlertDetailModal: React.FC<AlertDetailModalProps> = ({
-  isOpen,
   alertId,
   onClose,
   onDecisionCommitted,
 }) => {
   const { user } = useAuth();
   const [detail, setDetail] = useState<AlertDetail | null>(null);
-  const [isLoading, setIsLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
-  const [selectedCitationKey, setSelectedCitationKey] = useState<string | null>(null);
+  const [citation, setCitation] = useState<{ key: string } | null>(null);
+  const [refreshVersion, setRefreshVersion] = useState(0);
+  const [savedAuditId, setSavedAuditId] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!isOpen || !alertId) return;
-
-    let isCancelled = false;
-
-    getAlertDetail(alertId)
+    const controller = new AbortController();
+    getAlertDetail(alertId, controller.signal, user?.role)
       .then((data) => {
-        if (!isCancelled) {
-          setDetail(data);
-          setSelectedCitationKey(null);
-          setSubmitError(null);
-          setIsLoading(false);
-        }
+        if (!controller.signal.aborted) setDetail(data);
       })
       .catch((err: unknown) => {
-        if (!isCancelled) {
-          const message = err instanceof Error ? err.message : 'Alert detail could not be retrieved.';
-          setError(message);
-          setIsLoading(false);
+        if (!controller.signal.aborted) {
+          setError(err instanceof Error ? err.message : 'Alert detail could not be retrieved.');
         }
       });
-
-    return () => {
-      isCancelled = true;
-    };
-  }, [isOpen, alertId]);
+    return () => controller.abort();
+  }, [alertId, refreshVersion, user?.role]);
 
   // Handle Escape key to close modal
   useEffect(() => {
-    if (!isOpen) return;
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         onClose();
@@ -73,26 +58,26 @@ export const AlertDetailModal: React.FC<AlertDetailModalProps> = ({
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, onClose]);
+  }, [onClose]);
+
+  const refreshDetail = () => {
+    setDetail(null);
+    setError(null);
+    setSubmitError(null);
+    setCitation(null);
+    setRefreshVersion((version) => version + 1);
+  };
 
   // Handle decision submission
   const handleSubmitDecision = async (payload: DecisionPayload) => {
-    if (!user) return;
+    if (!user || isSubmitting) return;
     setIsSubmitting(true);
+    setSubmitError(null);
     try {
       const audit = await submitDecision(payload, user);
-      const targetState =
-        payload.action === 'ESCALATE'
-          ? 'ESCALATED'
-          : payload.action === 'RETRY_AI'
-          ? 'PENDING_REVIEW'
-          : 'CLOSED';
-      onDecisionCommitted(
-        `Action "${payload.action}" committed successfully (Audit #${audit.id.slice(-6)}). Alert transitioned to ${targetState}.`
-      );
-      onClose();
-
-
+      setSavedAuditId(audit.id);
+      refreshDetail();
+      onDecisionCommitted(`Decision saved. Audit #${audit.id.slice(-6)}.`);
     } catch (err: unknown) {
       console.error('Error submitting decision:', err);
       const message = err instanceof Error ? err.message : 'Failed to submit decision.';
@@ -102,22 +87,27 @@ export const AlertDetailModal: React.FC<AlertDetailModalProps> = ({
     }
   };
 
-  if (!isOpen) return null;
+  const assetTier = detail?.evidence_pack?.asset_context?.criticality_tier ?? detail?.asset?.criticality_tier;
 
   return (
     <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-sm flex items-center justify-center p-3 sm:p-5 animate-in fade-in duration-200">
-      <div className="w-full max-w-7xl h-[92vh] bg-black border border-zinc-800 rounded-2xl flex flex-col overflow-hidden shadow-2xl relative">
+      <div role="dialog" aria-modal="true" aria-label="Alert details" className="w-full max-w-7xl h-[92vh] bg-black border border-zinc-800 rounded-2xl flex flex-col overflow-hidden shadow-2xl relative">
+        {savedAuditId && (
+          <div role="status" className="shrink-0 border-b border-emerald-900 bg-emerald-950/40 px-5 py-2 text-xs text-emerald-200">
+            Decision saved. Audit #{savedAuditId.slice(-6)}.
+          </div>
+        )}
         {/* Loading State */}
-        {isLoading && (
-          <div className="flex-1 flex flex-col items-center justify-center gap-3 text-zinc-400 font-mono text-xs">
+        {!detail && !error && (
+          <div role="status" className="flex-1 flex flex-col items-center justify-center gap-3 text-zinc-400 font-mono text-xs">
             <Loader2 className="size-6 text-cyan-400 animate-spin" />
             <span>Loading telemetry evidence pack &amp; model assessment...</span>
           </div>
         )}
 
         {/* Error State */}
-        {!isLoading && error && (
-          <div className="flex-1 flex flex-col items-center justify-center gap-4 p-6 text-center">
+        {error && (
+          <div role="alert" className="flex-1 flex flex-col items-center justify-center gap-4 p-6 text-center">
             <div className="p-3 bg-red-950/60 border border-red-800 rounded-full text-red-400">
               <AlertCircle className="size-6" />
             </div>
@@ -125,18 +115,15 @@ export const AlertDetailModal: React.FC<AlertDetailModalProps> = ({
               <div className="text-sm font-semibold text-zinc-100 font-mono">Failed to Load Alert</div>
               <div className="text-xs text-zinc-400 font-sans max-w-md">{error}</div>
             </div>
-            <button
-              type="button"
-              onClick={onClose}
-              className="px-4 py-2 bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-xs font-mono text-zinc-300 rounded-lg transition-colors"
-            >
-              Close
-            </button>
+            <div className="flex gap-3">
+              <button type="button" onClick={refreshDetail} className="rounded border border-zinc-700 px-4 py-2 text-xs text-zinc-100">Retry alert</button>
+              <button type="button" onClick={onClose} className="rounded border border-zinc-800 px-4 py-2 text-xs text-zinc-300">Close</button>
+            </div>
           </div>
         )}
 
         {/* Loaded Detail Modal */}
-        {!isLoading && detail && (
+        {detail && !error && (
           <>
             {/* Modal Header */}
             <div className="border-b border-zinc-800 bg-zinc-950 px-5 py-3.5 flex items-start justify-between gap-4 shrink-0">
@@ -180,7 +167,7 @@ export const AlertDetailModal: React.FC<AlertDetailModalProps> = ({
                       #{detail.alert.agent_id}
                     </span>
                     <span className="text-zinc-500">({detail.alert.src_ip || 'Internal'})</span>
-                    <AssetTierBadge tier={detail.evidence_pack.asset_context.criticality_tier} />
+                    {assetTier && <AssetTierBadge tier={assetTier} />}
                   </div>
 
                   {detail.alert.process_signature && (
@@ -207,37 +194,37 @@ export const AlertDetailModal: React.FC<AlertDetailModalProps> = ({
             </div>
 
             {/* Split-Pane Body */}
-            <div className="flex-1 grid grid-cols-1 lg:grid-cols-2 divide-y lg:divide-y-0 lg:divide-x divide-zinc-800/80 min-h-0 overflow-hidden bg-black">
+            <div className="flex-1 grid grid-cols-1 grid-rows-2 lg:grid-cols-2 lg:grid-rows-1 divide-y lg:divide-y-0 lg:divide-x divide-zinc-800/80 min-h-0 overflow-hidden bg-black">
               {/* Left Pane: AI Assessment, Guardrails, Citations, Exemplars, Correlated Alerts */}
               <AssessmentPane
                 alertDetail={detail}
-                selectedCitationKey={selectedCitationKey}
-                onSelectCitationKey={(key) => setSelectedCitationKey(key)}
+                selectedCitationKey={citation?.key ?? null}
+                onSelectCitationKey={(key) => setCitation({ key })}
+                savedAuditId={savedAuditId}
               />
 
               {/* Right Pane: 3-Tab Evidence Tree & Prompt Inspector */}
-              <EvidenceTreePane
-                evidencePack={detail.evidence_pack}
-                citedEvidenceKeys={(detail.assessment || detail.ai_assessment)?.cited_evidence_keys || []}
-                selectedCitationKey={selectedCitationKey}
-              />
+              {detail.evidence_pack ? (
+                <EvidenceTreePane
+                  evidencePack={detail.evidence_pack}
+                  citedEvidenceKeys={(detail.assessment || detail.ai_assessment)?.cited_evidence_keys || []}
+                  citation={citation}
+                />
+              ) : (
+                <div className="flex-1 grid place-items-center p-6 text-sm text-zinc-400">
+                  {detail.alert.status === 'PENDING_REVIEW' ? 'Evidence pack pending.' : 'Evidence pack unavailable.'}
+                </div>
+              )}
             </div>
 
             {/* Inline Submission Error Banner */}
             {submitError && (
-              <div className="mx-5 mb-2 p-3 rounded-lg bg-red-950/70 border border-red-800 text-red-200 text-xs font-mono flex items-center justify-between gap-2 shadow-lg shrink-0">
+              <div role="alert" className="mx-5 mb-2 p-3 rounded-lg bg-red-950/70 border border-red-800 text-red-200 text-xs font-mono flex flex-wrap items-center justify-between gap-2 shrink-0">
                 <div className="flex items-center gap-2">
                   <AlertCircle className="size-4 text-red-400 shrink-0" />
                   <span>{submitError}</span>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => setSubmitError(null)}
-                  className="text-red-400 hover:text-red-200 p-0.5"
-                  title="Dismiss error"
-                >
-                  <X className="size-3.5" />
-                </button>
+                <button type="button" onClick={refreshDetail} className="rounded border border-red-700 px-3 py-1">Refresh alert</button>
               </div>
             )}
 
@@ -245,7 +232,7 @@ export const AlertDetailModal: React.FC<AlertDetailModalProps> = ({
             <DecisionActionPanel
               alert={detail.alert}
               assessment={detail.assessment || detail.ai_assessment}
-              userRole={user?.role || 'Analyst'}
+              availableActions={detail.available_actions}
               isSubmitting={isSubmitting}
               onSubmitDecision={handleSubmitDecision}
               onCloseModal={onClose}

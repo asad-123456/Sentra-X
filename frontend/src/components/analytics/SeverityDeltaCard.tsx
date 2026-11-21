@@ -26,6 +26,7 @@ export const SeverityDeltaCard: React.FC<SeverityDeltaCardProps> = ({
     );
   }
 
+  const percent = (value: number | null) => value == null ? '—' : `${value.toFixed(1)}%`;
   const { confusion_matrix, override_root_causes, severity_deltas } = summary;
 
   return (
@@ -41,11 +42,11 @@ export const SeverityDeltaCard: React.FC<SeverityDeltaCardProps> = ({
               </span>
             </div>
             <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-zinc-900 border border-zinc-800 text-zinc-300">
-              Cohen's κ = {summary.cohens_kappa.toFixed(2)}
+              Cohen's κ = {summary.cohens_kappa?.toFixed(2) ?? '—'}
             </span>
           </div>
           <p className="text-xs text-zinc-400 font-sans">
-            Cross-tabulation of autonomous AI triage proposals against final human supervisor decisions
+            Binary AI verdicts recorded at the time of the final human decision. Abstentions are excluded.
           </p>
         </div>
 
@@ -114,15 +115,15 @@ export const SeverityDeltaCard: React.FC<SeverityDeltaCardProps> = ({
         <div className="grid grid-cols-3 gap-2 pt-2 border-t border-zinc-900 text-center font-mono">
           <div className="p-2 rounded bg-zinc-900/40 border border-zinc-850">
             <span className="text-[10px] text-zinc-500 uppercase">Precision</span>
-            <div className="text-sm font-bold text-zinc-200">{summary.precision.toFixed(1)}%</div>
+            <div className="text-sm font-bold text-zinc-200">{percent(summary.precision)}</div>
           </div>
           <div className="p-2 rounded bg-zinc-900/40 border border-zinc-850">
             <span className="text-[10px] text-zinc-500 uppercase">Recall</span>
-            <div className="text-sm font-bold text-zinc-200">{summary.recall.toFixed(1)}%</div>
+            <div className="text-sm font-bold text-zinc-200">{percent(summary.recall)}</div>
           </div>
           <div className="p-2 rounded bg-zinc-900/40 border border-zinc-850">
             <span className="text-[10px] text-zinc-500 uppercase">Accuracy</span>
-            <div className="text-sm font-bold text-zinc-200">{summary.accuracy.toFixed(1)}%</div>
+            <div className="text-sm font-bold text-zinc-200">{percent(summary.accuracy)}</div>
           </div>
         </div>
       </div>
@@ -134,7 +135,7 @@ export const SeverityDeltaCard: React.FC<SeverityDeltaCardProps> = ({
             <div className="flex items-center gap-2">
               <PieChart className="size-4 text-cyan-400" />
               <span className="text-xs font-mono font-bold text-zinc-100 uppercase tracking-wider">
-                Guardrail Interventions &amp; Override Drivers
+                Guardrail Interventions &amp; Severity Changes
               </span>
             </div>
             <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-zinc-900 border border-zinc-800 text-zinc-400">
@@ -142,7 +143,7 @@ export const SeverityDeltaCard: React.FC<SeverityDeltaCardProps> = ({
             </span>
           </div>
           <p className="text-xs text-zinc-400 font-sans">
-            Safety rule triggers and primary justifications cited by analysts during override submissions
+            Safety rule triggers and severity changes recorded during analyst review.
           </p>
         </div>
 
@@ -163,23 +164,23 @@ export const SeverityDeltaCard: React.FC<SeverityDeltaCardProps> = ({
               <span>Abstentions</span>
             </div>
             <div className="text-lg font-bold text-amber-200">{severity_deltas.abstention_count}</div>
-            <div className="text-[9px] text-zinc-400 font-sans">Confidence &lt; 60%</div>
+            <div className="text-[9px] text-zinc-400 font-sans">Needs analyst review</div>
           </div>
 
           <div className="p-2.5 rounded-lg bg-fuchsia-950/30 border border-fuchsia-900/60 space-y-0.5">
             <div className="flex items-center gap-1.5 text-fuchsia-400 text-[10px] font-bold">
               <AlertTriangle className="size-3" />
-              <span>Sanitizations</span>
+              <span>Injection Flags</span>
             </div>
             <div className="text-lg font-bold text-fuchsia-200">
               {severity_deltas.injection_intercept_count}
             </div>
-            <div className="text-[9px] text-zinc-400 font-sans">Delimiter blocks</div>
+            <div className="text-[9px] text-zinc-400 font-sans">Evidence packs flagged</div>
           </div>
         </div>
 
         {/* Override Root Causes Bars */}
-        <div className="space-y-2 pt-1">
+        {override_root_causes.length > 0 && <div className="space-y-2 pt-1">
           <span className="text-[10px] font-mono text-zinc-500 uppercase tracking-wider block">
             Primary Analyst Override Justifications
           </span>
@@ -201,11 +202,11 @@ export const SeverityDeltaCard: React.FC<SeverityDeltaCardProps> = ({
               </div>
             ))}
           </div>
-        </div>
+        </div>}
 
         {/* Severity Shifts Row */}
         <div className="pt-2 border-t border-zinc-900 flex items-center justify-between text-[11px] font-mono text-zinc-400">
-          <span>Human Severity Upgrades:</span>
+          <span>Selected Human Severity Upgrades</span>
           <div className="flex items-center gap-3 text-zinc-300">
             <span>Low ➔ Critical: <strong className="text-red-400">{severity_deltas.low_to_critical}</strong></span>
             <span>•</span>

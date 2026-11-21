@@ -17,12 +17,12 @@ import { getQueueCounts, getSystemConfig } from '../../api/services';
 export const AppShell: React.FC = () => {
   const { user, logout, switchDemoRole } = useAuth();
   const navigate = useNavigate();
-  const [actionableCount, setActionableCount] = React.useState<number>(10);
+  const [actionableCount, setActionableCount] = React.useState<number | null>(null);
   const [llmLabel, setLlmLabel] = React.useState<string>('Gemini 2.5 Flash');
 
   React.useEffect(() => {
     getQueueCounts()
-      .then((c) => setActionableCount(c.awaiting))
+      .then((c) => setActionableCount((count) => count ?? c.awaiting))
       .catch(() => {});
 
     getSystemConfig()
@@ -42,7 +42,7 @@ export const AppShell: React.FC = () => {
       to: '/queue',
       label: 'Triage Queue',
       icon: Inbox,
-      badge: String(actionableCount),
+      badge: actionableCount == null ? undefined : String(actionableCount),
       allowedRoles: ['Analyst', 'TeamLead', 'Admin'] as UserRole[],
     },
     {
@@ -107,43 +107,44 @@ export const AppShell: React.FC = () => {
 
         {/* Right User Bar & Evaluator Role Demo Switcher */}
         <div className="flex items-center gap-3">
-          {/* Quick Demo Role Switcher */}
-          <div className="hidden sm:flex items-center gap-1 bg-zinc-900/80 p-0.5 rounded-lg border border-zinc-800 text-[11px] font-mono">
-            <span className="text-zinc-500 px-2">Demo Role:</span>
-            <button
-              type="button"
-              onClick={() => switchDemoRole('Analyst')}
-              className={`px-2 py-0.5 rounded transition-colors ${
-                user?.role === 'Analyst'
-                  ? 'bg-zinc-100 text-black font-semibold'
-                  : 'text-zinc-400 hover:text-zinc-200'
-              }`}
-            >
-              Analyst
-            </button>
-            <button
-              type="button"
-              onClick={() => switchDemoRole('TeamLead')}
-              className={`px-2 py-0.5 rounded transition-colors ${
-                user?.role === 'TeamLead'
-                  ? 'bg-zinc-100 text-black font-semibold'
-                  : 'text-zinc-400 hover:text-zinc-200'
-              }`}
-            >
-              TeamLead
-            </button>
-            <button
-              type="button"
-              onClick={() => switchDemoRole('Admin')}
-              className={`px-2 py-0.5 rounded transition-colors ${
-                user?.role === 'Admin'
-                  ? 'bg-zinc-100 text-black font-semibold'
-                  : 'text-zinc-400 hover:text-zinc-200'
-              }`}
-            >
-              Admin
-            </button>
-          </div>
+          {switchDemoRole && (
+            <div className="hidden sm:flex items-center gap-1 bg-zinc-900/80 p-0.5 rounded-lg border border-zinc-800 text-[11px] font-mono">
+              <span className="text-zinc-500 px-2">Demo Role:</span>
+              <button
+                type="button"
+                onClick={() => switchDemoRole('Analyst')}
+                className={`px-2 py-0.5 rounded transition-colors ${
+                  user?.role === 'Analyst'
+                    ? 'bg-zinc-100 text-black font-semibold'
+                    : 'text-zinc-400 hover:text-zinc-200'
+                }`}
+              >
+                Analyst
+              </button>
+              <button
+                type="button"
+                onClick={() => switchDemoRole('TeamLead')}
+                className={`px-2 py-0.5 rounded transition-colors ${
+                  user?.role === 'TeamLead'
+                    ? 'bg-zinc-100 text-black font-semibold'
+                    : 'text-zinc-400 hover:text-zinc-200'
+                }`}
+              >
+                TeamLead
+              </button>
+              <button
+                type="button"
+                onClick={() => switchDemoRole('Admin')}
+                className={`px-2 py-0.5 rounded transition-colors ${
+                  user?.role === 'Admin'
+                    ? 'bg-zinc-100 text-black font-semibold'
+                    : 'text-zinc-400 hover:text-zinc-200'
+                }`}
+              >
+                Admin
+              </button>
+            </div>
+          )}
 
           {/* User Role Badge */}
           <div className="flex items-center gap-2 pl-2 border-l border-zinc-800">
@@ -208,7 +209,7 @@ export const AppShell: React.FC = () => {
 
         {/* Dynamic Outlet Viewport */}
         <main className="flex-1 overflow-y-auto bg-black p-6">
-          <Outlet />
+          <Outlet context={setActionableCount} />
         </main>
       </div>
     </div>

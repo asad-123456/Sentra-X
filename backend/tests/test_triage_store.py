@@ -1,18 +1,15 @@
 """Integration tests for triage_store against a real PostgreSQL 16 (Part 6A-2).
 
-Needs a migrated test database. Defaults to the throwaway container:
-        "TEST_DATABASE_URL", "postgresql+psycopg://sentrax:sentrax@localhost:5432/sentrax_triage_test"
-Override with TEST_DATABASE_URL (the database name must end in _test).
+Set TEST_DATABASE_URL to a migrated, disposable database ending in _test.
 Every test runs inside a transaction that is rolled back, so nothing is left behind.
 """
 import json
-import os
 import uuid
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 
 import pytest
-from sqlalchemy import create_engine, text
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.services.evidence_assembler import select_correlated
@@ -20,32 +17,13 @@ from app.services.llm_adapter import InjectedExemplar, MockAdapter
 from app.services.triage_pipeline import run_triage_pipeline
 from app.services.triage_store import load_triage_inputs, persist_outcome
 
-TEST_DB_URL = os.getenv(
-    "TEST_DATABASE_URL", "postgresql+psycopg://sentrax:sentrax@localhost:5432/sentrax_triage_test"
-)
 REF = datetime(2026, 11, 17, 12, 0, tzinfo=timezone.utc)
 LOG = {"full_log": "Failed password for root from 203.0.113.9 port 4242 ssh2"}
 
 
-@pytest.fixture(scope="module")
-def engine():
-    eng = create_engine(TEST_DB_URL, pool_pre_ping=True)
-    if not (eng.url.database or "").endswith("_test"):
-        eng.dispose()
-        pytest.fail("refusing to run: the database name must end in _test")
-    try:
-        with eng.connect() as conn:
-            conn.execute(text("SELECT 1 FROM alerts LIMIT 1"))
-    except Exception as exc:
-        eng.dispose()
-        pytest.skip(f"test database not reachable or not migrated ({type(exc).__name__})")
-    yield eng
-    eng.dispose()
-
-
 @pytest.fixture()
-def session(engine):
-    conn = engine.connect()
+def session(triage_test_engine):
+    conn = triage_test_engine.connect()
     outer = conn.begin()
     sess = Session(bind=conn, join_transaction_mode="create_savepoint")
     try:
@@ -211,7 +189,7 @@ def test_a_failing_exemplar_lookup_falls_back_to_zero_shot(session):
 def test_persist_success_saves_pack_assessment_and_status(session):
     alert_id = make_alert(session, make_agent(session), level=12, raw_payload=LOG)
     outcome = triage(session, alert_id)
-    assert persist_outcome(session, alert_id, outcome) == "AWAITING_ANALYST"
+    assert persist_outcome(session, alert_id, outcome, expected_generation=0) == "AWAITING_ANALYST"
 
     pack = session.execute(
         text("""SELECT pack_json->'alert_metadata'->'rule'->>'id',
@@ -234,7 +212,7 @@ def test_persist_success_saves_pack_assessment_and_status(session):
 
 def test_persisting_twice_updates_in_place(session):
     alert_id = make_alert(session, make_agent(session), level=12, raw_payload=LOG)
-    persist_outcome(session, alert_id, triage(session, alert_id))
+    persist_outcome(session, alert_id, triage(session, alert_id), expected_generation=0)
 
     old = datetime(2026, 1, 1, tzinfo=timezone.utc)
     for table in ("evidence_packs", "ai_assessments"):
@@ -247,7 +225,7 @@ def test_persisting_twice_updates_in_place(session):
         {"id": alert_id},
     )
 
-    assert persist_outcome(session, alert_id, triage(session, alert_id)) == "AWAITING_ANALYST"
+    assert persist_outcome(session, alert_id, triage(session, alert_id), expected_generation=0) == "AWAITING_ANALYST"
     for table in ("evidence_packs", "ai_assessments"):
         assert count(session, table, alert_id) == 1
         created, updated = session.execute(
@@ -263,12 +241,12 @@ def test_persisting_twice_updates_in_place(session):
 
 def test_a_failed_run_keeps_the_pack_drops_the_assessment_and_needs_manual_triage(session):
     alert_id = make_alert(session, make_agent(session), level=12, raw_payload=LOG)
-    persist_outcome(session, alert_id, triage(session, alert_id))
+    persist_outcome(session, alert_id, triage(session, alert_id), expected_generation=0)
     session.execute(text("UPDATE alerts SET status = 'PENDING_REVIEW' WHERE id = :id"), {"id": alert_id})
 
     failed = triage(session, alert_id, MockAdapter(failure_mode="timeout"))
     assert failed.next_status == "NEEDS_MANUAL_TRIAGE" and failed.call.retry_count == 3
-    assert persist_outcome(session, alert_id, failed) == "NEEDS_MANUAL_TRIAGE"
+    assert persist_outcome(session, alert_id, failed, expected_generation=0) == "NEEDS_MANUAL_TRIAGE"
     assert count(session, "evidence_packs", alert_id) == 1
     assert count(session, "ai_assessments", alert_id) == 0
     assert tuple(alert_row(session, alert_id)) == ("NEEDS_MANUAL_TRIAGE", 3)
@@ -277,7 +255,7 @@ def test_a_failed_run_keeps_the_pack_drops_the_assessment_and_needs_manual_triag
 def test_a_decided_alert_is_never_touched(session):
     alert_id = make_alert(session, make_agent(session), status="CLOSED", level=12, raw_payload=LOG)
     outcome = triage(session, alert_id)
-    assert persist_outcome(session, alert_id, outcome) is None
+    assert persist_outcome(session, alert_id, outcome, expected_generation=0) is None
     assert count(session, "evidence_packs", alert_id) == 0
     assert count(session, "ai_assessments", alert_id) == 0
     assert tuple(alert_row(session, alert_id)) == ("CLOSED", 0)
@@ -287,7 +265,7 @@ def test_only_triage_statuses_can_be_written(session):
     alert_id = make_alert(session, make_agent(session), level=12, raw_payload=LOG)
     outcome = replace(triage(session, alert_id), next_status="CLOSED")
     with pytest.raises(ValueError):
-        persist_outcome(session, alert_id, outcome)
+        persist_outcome(session, alert_id, outcome, expected_generation=0)
     assert alert_row(session, alert_id)[0] == "PENDING_REVIEW"
 
 
@@ -295,7 +273,7 @@ def test_persisting_for_an_unknown_alert_raises_lookup_error(session):
     alert_id = make_alert(session, make_agent(session), level=12, raw_payload=LOG)
     outcome = triage(session, alert_id)
     with pytest.raises(LookupError):
-        persist_outcome(session, uuid.uuid4(), outcome)
+        persist_outcome(session, uuid.uuid4(), outcome, expected_generation=0)
 
 
 def test_nul_characters_in_model_text_are_stripped(session):
@@ -303,7 +281,7 @@ def test_nul_characters_in_model_text_are_stripped(session):
     outcome = triage(session, alert_id)
     bad = outcome.call.output.model_copy(update={"explanation": "bad\x00text"})
     outcome = replace(outcome, call=replace(outcome.call, output=bad))
-    persist_outcome(session, alert_id, outcome)
+    persist_outcome(session, alert_id, outcome, expected_generation=0)
     explanation = session.execute(
         text("SELECT explanation FROM ai_assessments WHERE alert_id = :id"), {"id": alert_id}
     ).scalar_one()

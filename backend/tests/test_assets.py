@@ -5,8 +5,7 @@ from datetime import datetime, timezone
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine, text
-from sqlalchemy.engine import make_url
+from sqlalchemy import text
 from sqlalchemy.orm import Session, sessionmaker
 
 import app.models  # noqa: F401  (registers every table on Base.metadata)
@@ -25,19 +24,12 @@ URL = "/api/v1/governance/assets"
 
 
 @pytest.fixture(scope="module")
-def factory():
-    url = make_url(settings.DATABASE_URL).set(database="sentrax_test")
-    engine = create_engine(url, connect_args={"connect_timeout": 5})
-    try:
-        with engine.connect() as c:
-            c.execute(text("SELECT 1"))
-    except Exception as exc:
-        pytest.skip(f"sentrax_test database not reachable: {exc}")
+def factory(legacy_test_engine):
+    engine = legacy_test_engine
     Base.metadata.drop_all(engine, tables=TABLES)
     Base.metadata.create_all(engine, tables=TABLES)
     yield sessionmaker(engine, expire_on_commit=False)
     Base.metadata.drop_all(engine, tables=TABLES)
-    engine.dispose()
 
 
 @pytest.fixture(autouse=True)

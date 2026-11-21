@@ -8,16 +8,14 @@ from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine, text
-from sqlalchemy.engine import make_url
+from sqlalchemy import text
 from sqlalchemy.orm import sessionmaker
 
 import app.models  # noqa: F401  (importing the package registers every table on Base.metadata)
-from app.config import settings
 from app.ingestion.db_access import get_session_factory
 from app.ingestion.poller import Poller
 from app.ingestion.service import ingest_raws
-from app.ingestion.webhook import verify_signature
+from app.ingestion.webhook import MAX_WEBHOOK_ALERTS, MAX_WEBHOOK_BYTES, verify_signature
 from app.main import app
 from app.models.base import Base
 from app.worker.jobs import triage_queue
@@ -28,19 +26,12 @@ TABLES = [Base.metadata.tables[n] for n in ("users", "assets", "alerts")]
 
 
 @pytest.fixture(scope="module")
-def factory():
-    url = make_url(settings.DATABASE_URL).set(database="sentrax_test")
-    engine = create_engine(url, connect_args={"connect_timeout": 5})
-    try:
-        with engine.connect() as c:
-            c.execute(text("SELECT 1"))
-    except Exception as exc:
-        pytest.skip(f"sentrax_test database not reachable: {exc}")
+def factory(legacy_test_engine):
+    engine = legacy_test_engine
     Base.metadata.drop_all(engine, tables=TABLES)
     Base.metadata.create_all(engine, tables=TABLES)
     yield sessionmaker(engine, expire_on_commit=False)
     Base.metadata.drop_all(engine, tables=TABLES)
-    engine.dispose()
 
 
 @pytest.fixture(autouse=True)
@@ -167,6 +158,11 @@ def test_webhook_accepts_good_and_rejects_bad(factory, monkeypatch):
                           headers={"X-Sentrax-Signature": sign("wrong", body)})
         assert bad.status_code == 401
         assert client.post("/api/webhooks/wazuh", content=body).status_code == 401
+        oversized = b" " * (MAX_WEBHOOK_BYTES + 1)
+        assert client.post("/api/webhooks/wazuh", content=oversized).status_code == 413
+        batch = json.dumps([one_alert()] * (MAX_WEBHOOK_ALERTS + 1)).encode()
+        assert client.post("/api/webhooks/wazuh", content=batch,
+                           headers={"X-Sentrax-Signature": sign("s3cret", batch)}).status_code == 413
         assert count(factory) == 1
     finally:
         app.dependency_overrides.clear()

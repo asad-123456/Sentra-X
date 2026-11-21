@@ -16,9 +16,11 @@ from app.ingestion.service import ingest_raws
 from app.ingestion.wazuh_settings import get_wazuh_settings
 
 router = APIRouter()
+MAX_WEBHOOK_BYTES = 1024 * 1024
+MAX_WEBHOOK_ALERTS = 100
 
 
-def verify_signature(secret: str, body: bytes, header: Optional[str]) -> bool:
+def verify_signature(secret: str, body: bytes | bytearray, header: Optional[str]) -> bool:
     if not secret or not header or not header.startswith("sha256="):
         return False
     expected = hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
@@ -31,7 +33,11 @@ async def wazuh_webhook(
     x_sentrax_signature: Optional[str] = Header(default=None),
     factory=Depends(get_session_factory),
 ):
-    body = await request.body()
+    body = bytearray()
+    async for chunk in request.stream():
+        if len(body) + len(chunk) > MAX_WEBHOOK_BYTES:
+            raise HTTPException(status_code=413, detail="webhook body exceeds 1 MiB")
+        body.extend(chunk)
     if not verify_signature(get_wazuh_settings().WAZUH_WEBHOOK_SECRET, body, x_sentrax_signature):
         raise HTTPException(status_code=401, detail="invalid signature")
     try:
@@ -39,6 +45,8 @@ async def wazuh_webhook(
     except ValueError:
         raise HTTPException(status_code=400, detail="body is not valid JSON")
     raws = payload if isinstance(payload, list) else [payload]
+    if len(raws) > MAX_WEBHOOK_ALERTS:
+        raise HTTPException(status_code=413, detail="webhook batch exceeds 100 alerts")
     try:
         summary = await run_in_threadpool(ingest_raws, factory, raws)
     except SQLAlchemyError:

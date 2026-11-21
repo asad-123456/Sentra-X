@@ -9,6 +9,7 @@ import {
 } from '../api/services';
 import { ExemplarTable } from '../components/governance/ExemplarTable';
 import { AssetRegistryTable } from '../components/governance/AssetRegistryTable';
+import { useAuth } from '../context/AuthContext';
 import {
   Server,
   RotateCcw,
@@ -19,6 +20,7 @@ import {
 type GovernanceTab = 'exemplars' | 'assets';
 
 export const GovernanceView: React.FC = () => {
+  const { user } = useAuth();
   const [activeTab, setActiveTab] = useState<GovernanceTab>('exemplars');
 
   // Exemplars State
@@ -104,7 +106,7 @@ export const GovernanceView: React.FC = () => {
     try {
       const updated = await toggleExemplarActive(id, active);
       setExemplars((prev) =>
-        prev.map((e) => (e.id === updated.id ? { ...e, is_active: updated.is_active } : e))
+        prev.map((e) => (String(e.id) === String(updated.id) ? updated : e))
       );
     } catch (err) {
       console.error('Failed to toggle exemplar active state:', err);
@@ -241,7 +243,7 @@ export const GovernanceView: React.FC = () => {
           <ExemplarTable
             exemplars={exemplars}
             isLoading={loadingExemplars}
-            onToggleActive={handleToggleExemplarActive}
+            onToggleActive={user?.role === 'TeamLead' ? handleToggleExemplarActive : undefined}
           />
         </div>
       )}
@@ -253,7 +255,7 @@ export const GovernanceView: React.FC = () => {
             assets={assets}
             isLoading={loadingAssets}
             onUpdateCriticality={handleUpdateCriticality}
-            onRegisterAsset={handleRegisterAsset}
+            onRegisterAsset={user?.role === 'Admin' ? handleRegisterAsset : undefined}
           />
         </div>
       )}

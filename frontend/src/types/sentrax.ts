@@ -54,7 +54,7 @@ export interface Asset {
   id?: string;
   agent_id: string;
   hostname: string;
-  ip_address: string;
+  ip_address: string | null;
   criticality_tier: AssetCriticalityTier;
   description?: string;
   created_at?: string;
@@ -89,11 +89,11 @@ export interface EvidencePack {
       };
     };
   };
-  asset_context: {
+  asset_context?: {
     agent_id: string;
     agent_name: string;
     criticality_tier: AssetCriticalityTier;
-  };
+  } | null;
   telemetry_payload: Record<string, unknown>;
   temporal_context: CorrelatedAlert[];
   injected_exemplar_ids: (number | string)[];
@@ -146,7 +146,7 @@ export interface FeedbackExemplar {
   id: number | string;
   source_alert_id: string | null;
   rule_id: string;
-  process_signature: string;
+  process_signature: string | null;
   asset_criticality: AssetCriticalityTier;
   calibrated_verdict: BinaryVerdict;
   calibrated_severity: SeverityLevel;
@@ -182,8 +182,9 @@ export interface Alert {
 // ---------------------------------------------------------------------------
 
 export interface AlertListItem extends Alert {
-  effective_severity: SeverityLevel;
-  effective_verdict: AIVerdict | 'NEEDS_MANUAL_TRIAGE';
+  available_actions: DecisionAction[];
+  effective_severity: SeverityLevel | null;
+  effective_verdict: AIVerdict | 'NEEDS_MANUAL_TRIAGE' | null;
   confidence_score?: number | null;
   truncated_explanation: string;
   explanation_snippet?: string;
@@ -196,7 +197,9 @@ export interface AlertListItem extends Alert {
 
 export interface AlertDetail {
   alert: Alert;
-  evidence_pack: EvidencePack;
+  available_actions: DecisionAction[];
+  asset?: Asset;
+  evidence_pack: EvidencePack | null;
   assessment?: AIAssessment;
   ai_assessment?: AIAssessment;
   injected_exemplars?: FeedbackExemplar[];
@@ -248,7 +251,7 @@ export interface QueueCounts {
   abstentionWarnings: number;
   awaitingAnalystCount?: number;
   needsManualTriageCount?: number;
-  meanLatencySeconds?: number;
+  meanLatencySeconds?: number | null;
 }
 
 export interface PaginatedResult<T> {
@@ -266,8 +269,9 @@ export interface PaginatedResult<T> {
 export interface OverrideTrendPoint {
   date: string;
   total_closed: number;
+  total_decisions?: number;
   override_count: number;
-  override_rate: number;
+  override_rate: number | null;
   exemplar_count: number;
 }
 
@@ -282,17 +286,28 @@ export interface SeverityDeltaSummary {
   injection_intercept_count: number;
 }
 
+export interface AnalyticsWindow {
+  start_date: string;
+  end_date: string;
+  rule_id: string | null;
+}
+
 export interface AnalyticsSummary {
+  report_window?: AnalyticsWindow;
+  audit_event_count?: number;
   total_closed: number;
-  agreement_rate: number;
-  override_rate: number;
-  escalated_rate: number;
-  manual_triage_rate: number;
-  mean_latency_seconds: number;
-  cohens_kappa: number;
-  precision: number;
-  recall: number;
-  accuracy: number;
+  comparison_count: number;
+  overridden_count: number;
+  guardrail_interventions: number;
+  agreement_rate: number | null;
+  override_rate: number | null;
+  escalated_rate: number | null;
+  manual_triage_rate: number | null;
+  mean_latency_seconds: number | null;
+  cohens_kappa: number | null;
+  precision: number | null;
+  recall: number | null;
+  accuracy: number | null;
   confusion_matrix: {
     tp_tp: number;
     tp_fp_overridden: number;

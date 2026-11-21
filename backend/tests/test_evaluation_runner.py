@@ -114,7 +114,7 @@ def test_report_and_export_reads_do_not_start_evaluation(monkeypatch):
         assert client.get(f"/api/v1/evaluation/{export}").status_code == 404
 
 
-def test_run_adds_no_rows_to_production_tables():  # AC-18
+def test_run_adds_no_rows_to_production_tables(application_test_database):  # AC-18
     from sqlalchemy import text
     from app.database import SyncSessionLocal
 
@@ -124,9 +124,6 @@ def test_run_adds_no_rows_to_production_tables():  # AC-18
         with SyncSessionLocal() as s:
             return {t: s.execute(text(f"SELECT count(*) FROM {t}")).scalar_one() for t in tables}
 
-    try:
-        before = counts()
-    except Exception as exc:
-        pytest.skip(f"database not reachable ({type(exc).__name__})")
+    before = counts()
     EvaluationRunner.run()
     assert counts() == before

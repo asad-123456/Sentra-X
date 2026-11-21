@@ -14,8 +14,10 @@ import type {
   AlertDetail,
   AlertListItem,
   AnalyticsSummary,
+  AnalyticsWindow,
   Asset,
   AssetCriticalityTier,
+  DecisionAction,
   DecisionPayload,
   FeedbackExemplar,
   AnalystDecisionAudit,
@@ -52,12 +54,12 @@ const storeAssets: Asset[] = JSON.parse(JSON.stringify(INITIAL_ASSETS));
 const storeExemplars: FeedbackExemplar[] = JSON.parse(JSON.stringify(INITIAL_EXEMPLARS));
 const storeAuditTrail: AnalystDecisionAudit[] = JSON.parse(JSON.stringify(INITIAL_AUDIT_TRAIL));
 const storeEvidencePacks = JSON.parse(JSON.stringify(INITIAL_EVIDENCE_PACKS));
-const storeAssessments = JSON.parse(JSON.stringify(INITIAL_ASSESSMENTS));
+const storeAssessments: typeof INITIAL_ASSESSMENTS = JSON.parse(JSON.stringify(INITIAL_ASSESSMENTS));
 const storeAnalytics: AnalyticsSummary = JSON.parse(JSON.stringify(INITIAL_ANALYTICS));
 const storeUsers: User[] = JSON.parse(JSON.stringify(DEMO_USERS));
 let storeSystemConfig: SystemConfig = JSON.parse(JSON.stringify(INITIAL_SYSTEM_CONFIG));
 let storeTotalOverrides = 24;
-let storeTotalAgreements = Math.round((storeAnalytics.agreement_rate / 100) * storeAnalytics.total_closed);
+let storeTotalAgreements = Math.round(((storeAnalytics.agreement_rate ?? 0) / 100) * storeAnalytics.total_closed);
 
 // Helper: simulated async latency (50-100ms) for realistic UX transitions
 const simulateLatency = async (ms = 80) => {
@@ -68,7 +70,22 @@ const simulateLatency = async (ms = 80) => {
 // Alert & Queue Services (FR-1, FR-5)
 // ---------------------------------------------------------------------------
 
-export async function getAlerts(filters: QueueFilters): Promise<PaginatedResult<AlertListItem>> {
+function fixtureActions(status: Alert['status'], role: UserRole, assessment?: AIAssessment): DecisionAction[] {
+  switch (status) {
+    case 'AWAITING_ANALYST':
+      return assessment ? ['APPROVE', 'OVERRIDE', 'ESCALATE', 'RETRY_AI'] : ['OVERRIDE', 'ESCALATE', 'RETRY_AI'];
+    case 'NEEDS_MANUAL_TRIAGE':
+      return ['MANUAL_TRIAGE_CLOSURE', 'ESCALATE', 'RETRY_AI'];
+    case 'PENDING_REVIEW':
+      return ['MANUAL_TRIAGE_CLOSURE', 'ESCALATE'];
+    case 'ESCALATED':
+      return role === 'Analyst' ? [] : ['RESOLVE_ESCALATION'];
+    case 'CLOSED':
+      return [];
+  }
+}
+
+export async function getAlerts(filters: QueueFilters, signal?: AbortSignal): Promise<PaginatedResult<AlertListItem>> {
   if (isLiveBackendConfigured()) {
     const params = new URLSearchParams({
       tab: filters.tab,
@@ -81,7 +98,7 @@ export async function getAlerts(filters: QueueFilters): Promise<PaginatedResult<
     if (filters.guardrail && filters.guardrail !== 'ALL') params.append('guardrail', filters.guardrail);
     if (filters.assetTier && filters.assetTier !== 'ALL') params.append('assetTier', filters.assetTier);
     if (filters.ruleId) params.append('rule_id', filters.ruleId);
-    return apiClient<PaginatedResult<AlertListItem>>(`/api/v1/alerts?${params.toString()}`);
+    return apiClient<PaginatedResult<AlertListItem>>(`/api/v1/alerts?${params.toString()}`, { signal });
   }
 
   await simulateLatency(120);
@@ -95,10 +112,7 @@ export async function getAlerts(filters: QueueFilters): Promise<PaginatedResult<
       if (filters.subStatus === 'NEEDS_MANUAL_TRIAGE') {
         return alert.status === 'NEEDS_MANUAL_TRIAGE';
       }
-      return (
-        alert.status === 'AWAITING_ANALYST' ||
-        alert.status === 'NEEDS_MANUAL_TRIAGE'
-      );
+      return alert.status === 'AWAITING_ANALYST' || alert.status === 'NEEDS_MANUAL_TRIAGE' || alert.status === 'PENDING_REVIEW';
     }
 
     if (filters.tab === 'escalated') {
@@ -118,6 +132,7 @@ export async function getAlerts(filters: QueueFilters): Promise<PaginatedResult<
 
     return {
       ...alert,
+      available_actions: fixtureActions(alert.status, 'Analyst', assessment),
       effective_severity: assessment ? assessment.effective_severity : (alert.rule_level >= 12 ? 'CRITICAL' : alert.rule_level >= 8 ? 'HIGH' : 'MEDIUM'),
       effective_verdict: assessment
         ? assessment.effective_verdict
@@ -178,7 +193,8 @@ export async function getAlerts(filters: QueueFilters): Promise<PaginatedResult<
   // 8. Deterministic Sort: effective_severity DESC (CRITICAL -> HIGH -> MEDIUM -> LOW), then ingested_at ASC
   const severityRank: Record<string, number> = { CRITICAL: 4, HIGH: 3, MEDIUM: 2, LOW: 1 };
   listItems.sort((a, b) => {
-    const diff = (severityRank[b.effective_severity] || 0) - (severityRank[a.effective_severity] || 0);
+    const diff = (b.effective_severity ? severityRank[b.effective_severity] : 0) -
+      (a.effective_severity ? severityRank[a.effective_severity] : 0);
     if (diff !== 0) return diff;
     return new Date(a.ingested_at).getTime() - new Date(b.ingested_at).getTime();
   });
@@ -197,9 +213,9 @@ export async function getAlerts(filters: QueueFilters): Promise<PaginatedResult<
   };
 }
 
-export async function getQueueCounts(): Promise<QueueCounts> {
+export async function getQueueCounts(signal?: AbortSignal): Promise<QueueCounts> {
   if (isLiveBackendConfigured()) {
-    return apiClient<QueueCounts>('/api/v1/alerts/counts');
+    return apiClient<QueueCounts>('/api/v1/alerts/counts', { signal });
   }
 
   await simulateLatency(40);
@@ -211,10 +227,13 @@ export async function getQueueCounts(): Promise<QueueCounts> {
   let abstentionWarnings = 0;
   let awaitingAnalystCount = 0;
   let needsManualTriageCount = 0;
+  const latencies = Object.values(storeAssessments).map((assessment) => assessment.latency_ms);
 
   for (const alert of storeAlerts) {
     const assessment = storeAssessments[alert.id];
-    if (alert.status === 'AWAITING_ANALYST' || alert.status === 'NEEDS_MANUAL_TRIAGE') {
+    if (alert.status === 'PENDING_REVIEW') {
+      awaiting++;
+    } else if (alert.status === 'AWAITING_ANALYST' || alert.status === 'NEEDS_MANUAL_TRIAGE') {
       awaiting++;
       if (alert.status === 'AWAITING_ANALYST') awaitingAnalystCount++;
       if (alert.status === 'NEEDS_MANUAL_TRIAGE') needsManualTriageCount++;
@@ -241,23 +260,27 @@ export async function getQueueCounts(): Promise<QueueCounts> {
     abstentionWarnings,
     awaitingAnalystCount,
     needsManualTriageCount,
-    meanLatencySeconds: 1.2,  // BUG-N9 fix: field required by QueueCounts type
+    meanLatencySeconds: latencies.length
+      ? latencies.reduce((total, latency) => total + latency, 0) / latencies.length / 1000
+      : null,
   };
 }
 
-export async function getAlertDetail(alertId: string): Promise<AlertDetail> {
+export async function getAlertDetail(alertId: string, signal?: AbortSignal, role: UserRole = 'Analyst'): Promise<AlertDetail> {
   if (isLiveBackendConfigured()) {
     const raw = await apiClient<AlertDetail & {
       assessment?: AIAssessment;
       decision_audit_trail?: AnalystDecisionAudit[];
       injected_exemplars?: FeedbackExemplar[];
-    }>(`/api/v1/alerts/${alertId}`);
+    }>(`/api/v1/alerts/${alertId}`, { signal });
     const assessment = raw.assessment || raw.ai_assessment;
     const audit_trail = raw.decision_audit_trail || raw.audit_trail || [];
     const injected_exemplars = raw.injected_exemplars || raw.relevant_exemplars || [];
     const correlated_alerts = raw.correlated_alerts || raw.evidence_pack?.temporal_context || [];
     return {
       alert: raw.alert,
+      available_actions: raw.available_actions ?? [],
+      asset: raw.asset,
       evidence_pack: raw.evidence_pack,
       assessment,
       ai_assessment: assessment,
@@ -349,6 +372,7 @@ export async function getAlertDetail(alertId: string): Promise<AlertDetail> {
 
   return {
     alert,
+    available_actions: fixtureActions(alert.status, role, storeAssessments[alertId]),
     evidence_pack: evidencePack,
     assessment,
     ai_assessment: assessment,           // BUG-N10 fix: alias for live-path parity
@@ -398,6 +422,9 @@ export async function submitDecision(
   }
 
   const assessment = storeAssessments[payload.alert_id];
+  if (!fixtureActions(alert.status, user.role, assessment).includes(payload.action)) {
+    throw new ApiError(422, 'This action is unavailable for the current alert. Refresh the alert to review its state.');
+  }
 
   // Validation: Rationale >= 10 characters for actions requiring mandatory justification per FR-6
   const requiresRationale =
@@ -479,6 +506,7 @@ export async function submitDecision(
 
     // Update analytics override count
     storeTotalOverrides += 1;
+    storeAnalytics.overridden_count = storeTotalOverrides;
     storeAnalytics.total_closed += 1;
     storeAnalytics.override_rate = Number(
       ((storeTotalOverrides / storeAnalytics.total_closed) * 100).toFixed(1)
@@ -504,13 +532,18 @@ export async function submitDecision(
 
 export async function quickApprove(alertId: string, user: User): Promise<AnalystDecisionAudit> {
   const detail = await getAlertDetail(alertId);
-  const activeAssessment = detail.assessment || detail.ai_assessment;
+  const assessment = detail.assessment || detail.ai_assessment;
+  const verdict = assessment?.effective_verdict;
+  if (!detail.available_actions.includes('APPROVE') || !assessment || assessment.abstention_triggered ||
+      (verdict !== 'TRUE_POSITIVE' && verdict !== 'FALSE_POSITIVE')) {
+    throw new ApiError(422, 'Quick approval requires a saved, non-abstaining assessment. Open the alert to review it.');
+  }
   return submitDecision(
     {
       alert_id: alertId,
       action: 'APPROVE',
-      final_verdict: activeAssessment?.effective_verdict === 'FALSE_POSITIVE' ? 'FALSE_POSITIVE' : 'TRUE_POSITIVE',
-      final_severity: activeAssessment?.effective_severity || 'HIGH',
+      final_verdict: verdict,
+      final_severity: assessment.effective_severity,
       rationale: 'Quick approved from triage queue view (<= 2-click workflow).',
     },
     user
@@ -521,89 +554,12 @@ export async function quickApprove(alertId: string, user: User): Promise<Analyst
 // Analytics & CSV Export Services (FR-7, NFR-4, NFR-5)
 // ---------------------------------------------------------------------------
 
-interface RawAnalyticsData {
-  total_closed?: number;
-  total_closed_decisions?: number;
-  agreement_rate?: number;
-  ai_agreement_rate?: number;
-  override_rate?: number;
-  human_override_rate?: number;
-  escalated_rate?: number;
-  manual_triage_rate?: number;
-  mean_latency_seconds?: number;
-  mean_triage_latency_seconds?: number;
-  cohens_kappa?: number;
-  precision?: number;
-  recall?: number;
-  accuracy?: number;
-  confusion_matrix?: {
-    tp_tp: number;
-    tp_fp_overridden: number;
-    fp_tp_overridden: number;
-    fp_fp: number;
-  };
-  agreement_matrix?: Record<string, number>;
-  override_root_causes?: Array<{ cause: string; count: number; percentage: number }> | Record<string, number>;
-  trendline?: Array<Record<string, unknown>>;
-  override_trend?: Array<Record<string, unknown>>;
-  severity_deltas?: AnalyticsSummary['severity_deltas'];
-  guardrail_breakdown?: {
-    safety_floor_interventions?: number;
-    abstention_fallbacks?: number;
-    prompt_injection_flags?: number;
-  };
-}
-
-export async function getAnalytics(dateRange = '30d', ruleId?: string): Promise<AnalyticsSummary> {
-  const queryParams = new URLSearchParams();
-  queryParams.set('range', dateRange);
-  queryParams.set('date_range', dateRange);
-  if (ruleId && ruleId !== 'ALL') queryParams.set('rule_id', ruleId);
-
+export async function getAnalytics(dateRange = '30d', ruleId?: string, signal?: AbortSignal): Promise<AnalyticsSummary> {
   if (isLiveBackendConfigured()) {
-    const raw = await apiClient<RawAnalyticsData>(`/api/v1/analytics?${queryParams.toString()}`);
-    return {
-      total_closed: raw.total_closed ?? raw.total_closed_decisions ?? 0,
-      agreement_rate: raw.agreement_rate ?? raw.ai_agreement_rate ?? 0,
-      override_rate: raw.override_rate ?? raw.human_override_rate ?? 0,
-      escalated_rate: raw.escalated_rate ?? 0,
-      manual_triage_rate: raw.manual_triage_rate ?? 0,
-      mean_latency_seconds: raw.mean_latency_seconds ?? raw.mean_triage_latency_seconds ?? 1.25,
-      cohens_kappa: raw.cohens_kappa ?? 0.82,
-      precision: raw.precision ?? 92.8,
-      recall: raw.recall ?? 94.8,
-      accuracy: raw.accuracy ?? 91.4,
-      confusion_matrix: raw.confusion_matrix || {
-        tp_tp: raw.agreement_matrix?.agreed_tp ?? raw.agreement_matrix?.agreed_true_positive ?? 0,
-        tp_fp_overridden: raw.agreement_matrix?.benign_filter ?? raw.agreement_matrix?.analyst_overrode_to_fp ?? 0,
-        fp_tp_overridden: raw.agreement_matrix?.threat_rescue ?? raw.agreement_matrix?.analyst_overrode_to_tp ?? 0,
-        fp_fp: raw.agreement_matrix?.agreed_fp ?? raw.agreement_matrix?.agreed_false_positive ?? 0,
-      },
-      override_root_causes: Array.isArray(raw.override_root_causes)
-        ? raw.override_root_causes
-        : Object.entries(raw.override_root_causes || {}).map(([cause, count]) => ({
-            cause,
-            count: Number(count),
-            percentage: Math.round((Number(count) / 100) * 100),
-          })),
-      trendline: (raw.trendline || raw.override_trend || []).map((p: Record<string, unknown>) => ({
-        date: String(p.date),
-        total_closed: Number(p.total_closed ?? p.total_decisions ?? 0),
-        override_count: Number(p.override_count ?? Math.round(((Number(p.total_closed ?? p.total_decisions ?? 0)) * (Number(p.override_rate ?? 0))) / 100)),
-        override_rate: Number(p.override_rate ?? 0),
-        exemplar_count: Number(p.exemplar_count ?? p.active_exemplars ?? 0),
-      })),
-      severity_deltas: raw.severity_deltas || {
-        low_to_critical: 2,
-        medium_to_high: 6,
-        high_to_critical: 4,
-        tp_to_fp: raw.agreement_matrix?.benign_filter ?? 0,
-        fp_to_tp: raw.agreement_matrix?.threat_rescue ?? 0,
-        safety_floor_count: raw.guardrail_breakdown?.safety_floor_interventions ?? 0,
-        abstention_count: raw.guardrail_breakdown?.abstention_fallbacks ?? 0,
-        injection_intercept_count: raw.guardrail_breakdown?.prompt_injection_flags ?? 0,
-      },
-    };
+    const query = new URLSearchParams({ range: dateRange });
+    const rule = ruleId?.trim();
+    if (rule && rule !== 'ALL') query.set('rule_id', rule);
+    return apiClient<AnalyticsSummary>(`/api/v1/analytics?${query}`, { signal });
   }
 
   await simulateLatency(90);
@@ -634,9 +590,15 @@ export async function getAnalytics(dateRange = '30d', ruleId?: string): Promise<
   };
 }
 
-export async function exportAuditCsv(): Promise<string> {
+export async function exportAuditCsv(reportWindow?: AnalyticsWindow): Promise<string> {
   if (isLiveBackendConfigured()) {
-    return apiClient<string>(`/api/v1/analytics/export-csv`);
+    if (!reportWindow) throw new Error('Refresh analytics to load the reporting window before exporting.');
+    const query = new URLSearchParams({
+      start_date: reportWindow.start_date,
+      end_date: reportWindow.end_date,
+    });
+    if (reportWindow.rule_id) query.set('rule_id', reportWindow.rule_id);
+    return apiClient<string>(`/api/v1/analytics/export-csv?${query}`);
   }
 
   await simulateLatency(100);
@@ -726,7 +688,7 @@ export async function updateAssetCriticality(
   description?: string
 ): Promise<Asset> {
   if (isLiveBackendConfigured()) {
-    return apiClient<Asset>(`/api/v1/governance/assets/${agentId}`, {
+    return apiClient<Asset>(`/api/v1/governance/assets/${encodeURIComponent(agentId)}`, {
       method: 'PATCH',
       body: JSON.stringify({ criticality_tier: tier, description }),
     });

@@ -40,7 +40,7 @@ _DELIMITER_PATTERNS = [
     ("bracket_role_tag", re.compile(r"\[\s*/?\s*(?:INST|SYSTEM|ASSISTANT|USER|HUMAN)\s*\]", _I)),
     ("code_fence", re.compile(r"`{3,}|~{3,}")),
     ("angle_run", re.compile(r"[<>]{3,}")),
-    ("role_label", re.compile(r"\b(?:system|human|assistant)(?:\s+note)?\s*:", _I)),
+    ("role_label", re.compile(r"(?:^|(?<=\s))(?:system|human|assistant)(?:\s+note)?\s*:", _I | re.MULTILINE)),
 ]
 
 # Override and manipulation phrases: flagged only, text is kept.

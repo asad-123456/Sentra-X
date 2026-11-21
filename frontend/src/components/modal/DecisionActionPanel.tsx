@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import type {
   Alert,
   AIAssessment,
-  UserRole,
+  DecisionAction,
   DecisionPayload,
   BinaryVerdict,
   SeverityLevel,
@@ -25,7 +25,7 @@ import {
 interface DecisionActionPanelProps {
   alert: Alert;
   assessment?: AIAssessment;
-  userRole: UserRole;
+  availableActions: DecisionAction[];
   isSubmitting: boolean;
   onSubmitDecision: (payload: DecisionPayload) => Promise<void>;
   onCloseModal: () => void;
@@ -34,7 +34,7 @@ interface DecisionActionPanelProps {
 export const DecisionActionPanel: React.FC<DecisionActionPanelProps> = ({
   alert,
   assessment,
-  userRole,
+  availableActions,
   isSubmitting,
   onSubmitDecision,
   onCloseModal,
@@ -48,10 +48,10 @@ export const DecisionActionPanel: React.FC<DecisionActionPanelProps> = ({
   const [overrideTab, setOverrideTab] = useState<'parameters' | 'review'>('parameters');
 
   // Form states
-  const [verdict, setVerdict] = useState<BinaryVerdict>(
+  const [verdict, setVerdict] = useState<BinaryVerdict | ''>(
     assessment?.effective_verdict === 'FALSE_POSITIVE' ? 'FALSE_POSITIVE' : 'TRUE_POSITIVE'
   );
-  const [severity, setSeverity] = useState<SeverityLevel>(assessment?.effective_severity || 'HIGH');
+  const [severity, setSeverity] = useState<SeverityLevel | ''>(assessment?.effective_severity || 'HIGH');
   const [rationale, setRationale] = useState<string>('');
   const [saveExemplar, setSaveExemplar] = useState<boolean>(true);
   const [validationError, setValidationError] = useState<string | null>(null);
@@ -64,8 +64,8 @@ export const DecisionActionPanel: React.FC<DecisionActionPanelProps> = ({
   };
 
   const handleApproveClick = async () => {
-    // If effective verdict is NEEDS_ANALYST_REVIEW or assessment missing, analyst must pick binary verdict first
-    if (!assessment || assessment.effective_verdict === 'NEEDS_ANALYST_REVIEW') {
+    if (!assessment) return;
+    if (assessment.abstention_triggered || assessment.effective_verdict === 'NEEDS_ANALYST_REVIEW') {
       setPanelMode('approve_prompt');
       return;
     }
@@ -81,11 +81,12 @@ export const DecisionActionPanel: React.FC<DecisionActionPanelProps> = ({
   };
 
   const handleApproveWithVerdict = async (chosenVerdict: BinaryVerdict) => {
+    if (!assessment) return;
     await onSubmitDecision({
       alert_id: alert.id,
       action: 'APPROVE',
       final_verdict: chosenVerdict,
-      final_severity: assessment?.effective_severity || 'HIGH',
+      final_severity: assessment.effective_severity,
       rationale: `Accepted assessment with confirmed ${chosenVerdict} disposition.`,
     });
   };
@@ -106,26 +107,20 @@ export const DecisionActionPanel: React.FC<DecisionActionPanelProps> = ({
     });
   };
 
-  const handleProceedToReview = (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
-    if (rationale.trim().length < 10) {
-      setValidationError(
-        'HTTP 422 Unprocessable Entity: Decision rationale must be at least 10 characters long before proceeding to Review Override.'
-      );
-      return;
-    }
-    setValidationError(null);
-    setOverrideTab('review');
+  const dispositionError = !verdict || !severity
+    ? 'Select a final verdict and severity.'
+    : rationale.trim().length < 10 ? 'Enter a rationale of at least 10 characters.' : null;
+
+  const handleProceedToReview = () => {
+    setValidationError(dispositionError);
+    if (!dispositionError) setOverrideTab('review');
   };
 
   const handleFormSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    // Rationale length validation
-    if (rationale.trim().length < 10) {
-      setValidationError(
-        'HTTP 422 Unprocessable Entity: Decision rationale must be at least 10 characters long to provide an auditable justification.'
-      );
+    if (dispositionError || !verdict || !severity) {
+      setValidationError(dispositionError);
       setOverrideTab('parameters');
       return;
     }
@@ -156,13 +151,16 @@ export const DecisionActionPanel: React.FC<DecisionActionPanelProps> = ({
   };
 
   const isClosed = alert.status === 'CLOSED';
-  const isAwaiting = alert.status === 'AWAITING_ANALYST';
+  const isPending = alert.status === 'PENDING_REVIEW';
   const isNeedsManual = alert.status === 'NEEDS_MANUAL_TRIAGE';
   const isEscalated = alert.status === 'ESCALATED';
-  const canResolveEscalation = isEscalated && (userRole === 'TeamLead' || userRole === 'Admin');
+  const supports = (action: DecisionAction) => availableActions.includes(action);
+  const isManualDisposition = panelMode === 'manual_close';
+  const isResolving = panelMode === 'resolve_escalation';
+  const reviewLabel = isManualDisposition || isResolving ? 'Review Disposition' : 'Review Override';
 
   return (
-    <div className="border-t border-zinc-800 bg-zinc-950 p-4 shrink-0 space-y-4">
+    <div className="border-t border-zinc-800 bg-zinc-950 p-4 shrink-0 max-h-[68%] overflow-y-auto space-y-4">
       {/* Inline Forms for Override, Manual Close, or Resolve Escalation */}
       {panelMode !== 'none' && panelMode !== 'approve_prompt' && (
         <form
@@ -214,7 +212,7 @@ export const DecisionActionPanel: React.FC<DecisionActionPanelProps> = ({
               }`}
             >
               <ShieldAlert className="size-3.5 text-amber-400" />
-              <span>Review Override</span>
+              <span>{reviewLabel}</span>
               {saveExemplar && (
                 <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-950/80 text-amber-300 border border-amber-800/60 font-mono">
                   Poisoning Guard
@@ -225,7 +223,7 @@ export const DecisionActionPanel: React.FC<DecisionActionPanelProps> = ({
 
           {/* Validation Error Banner */}
           {validationError && (
-            <div className="p-3 rounded-lg bg-red-950/60 border border-red-800 text-red-200 text-xs font-mono flex items-center gap-2">
+            <div role="alert" className="p-3 rounded-lg bg-red-950/60 border border-red-800 text-red-200 text-xs font-mono flex items-center gap-2">
               <AlertCircle className="size-4 text-red-400 shrink-0" />
               <span>{validationError}</span>
             </div>
@@ -242,6 +240,7 @@ export const DecisionActionPanel: React.FC<DecisionActionPanelProps> = ({
                     <button
                       type="button"
                       onClick={() => setVerdict('TRUE_POSITIVE')}
+                      aria-pressed={verdict === 'TRUE_POSITIVE'}
                       className={`py-2 px-3 rounded-lg text-xs font-mono font-bold transition-all cursor-pointer ${
                         verdict === 'TRUE_POSITIVE'
                           ? 'bg-red-950 text-red-200 border border-red-500 shadow-[0_0_10px_rgba(239,68,68,0.25)]'
@@ -253,6 +252,7 @@ export const DecisionActionPanel: React.FC<DecisionActionPanelProps> = ({
                     <button
                       type="button"
                       onClick={() => setVerdict('FALSE_POSITIVE')}
+                      aria-pressed={verdict === 'FALSE_POSITIVE'}
                       className={`py-2 px-3 rounded-lg text-xs font-mono font-bold transition-all cursor-pointer ${
                         verdict === 'FALSE_POSITIVE'
                           ? 'bg-emerald-950 text-emerald-200 border border-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.25)]'
@@ -265,12 +265,14 @@ export const DecisionActionPanel: React.FC<DecisionActionPanelProps> = ({
                 </div>
 
                 <div className="space-y-1.5">
-                  <label className="text-[11px] font-mono text-zinc-400">FINAL SEVERITY</label>
+                  <label htmlFor="disposition-severity" className="text-[11px] font-mono text-zinc-400">FINAL SEVERITY</label>
                   <select
+                    id="disposition-severity"
                     value={severity}
                     onChange={(e) => setSeverity(e.target.value as SeverityLevel)}
                     className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-xs font-mono text-zinc-100 focus:outline-none focus:border-zinc-600 cursor-pointer"
                   >
+                    {isPending && <option value="" disabled>Select severity</option>}
                     <option value="CRITICAL">CRITICAL (12–15)</option>
                     <option value="HIGH">HIGH (8–11)</option>
                     <option value="MEDIUM">MEDIUM (4–7)</option>
@@ -282,7 +284,7 @@ export const DecisionActionPanel: React.FC<DecisionActionPanelProps> = ({
               {/* Rationale Textarea */}
               <div className="space-y-1.5">
                 <div className="flex items-center justify-between text-[11px] font-mono">
-                  <label className="text-zinc-300">
+                  <label htmlFor="disposition-rationale" className="text-zinc-300">
                     AUDIT RATIONALE <span className="text-red-400">*</span>
                   </label>
                   <span
@@ -294,6 +296,7 @@ export const DecisionActionPanel: React.FC<DecisionActionPanelProps> = ({
                   </span>
                 </div>
                 <textarea
+                  id="disposition-rationale"
                   value={rationale}
                   onChange={(e) => {
                     setRationale(e.target.value);
@@ -336,7 +339,7 @@ export const DecisionActionPanel: React.FC<DecisionActionPanelProps> = ({
                   onClick={handleProceedToReview}
                   className="flex items-center gap-2 px-5 py-2 rounded-lg bg-white hover:bg-zinc-200 text-black font-mono font-bold text-xs shadow-md transition-all cursor-pointer"
                 >
-                  <span>Review Override</span>
+                  <span>{reviewLabel}</span>
                   <ArrowRight className="size-3.5" />
                 </button>
               </div>
@@ -353,7 +356,7 @@ export const DecisionActionPanel: React.FC<DecisionActionPanelProps> = ({
                   <span>Feedback Poisoning Prevention Gate</span>
                 </div>
                 <p className="text-[11px] text-zinc-300 leading-relaxed font-sans">
-                  Please verify your override disposition and rationale before final commit. Erroneous verdicts or inaccurate rationales directly contaminate the few-shot calibration catalog for future LLM triage queries.
+                  Verify the verdict and rationale before committing. Saved exemplars can inform future AI assessments.
                 </p>
               </div>
 
@@ -376,11 +379,11 @@ export const DecisionActionPanel: React.FC<DecisionActionPanelProps> = ({
                 <div className="space-y-2 p-3 rounded-lg bg-zinc-900 border border-cyan-800/60">
                   <div className="flex items-center justify-between">
                     <span className="text-[10px] font-mono text-cyan-400 uppercase tracking-wider font-semibold">
-                      Proposed Analyst Override
+                      {isManualDisposition || isResolving ? 'Proposed Disposition' : 'Proposed Analyst Override'}
                     </span>
-                    <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-cyan-950 text-cyan-300 border border-cyan-700/80">
+                    {assessment && <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-cyan-950 text-cyan-300 border border-cyan-700/80">
                       {verdict === assessment?.effective_verdict ? 'Severity Adjustment' : 'Verdict Flip'}
-                    </span>
+                    </span>}
                   </div>
                   <div className="flex items-center gap-2">
                     <span className={`text-xs font-mono font-bold ${verdict === 'TRUE_POSITIVE' ? 'text-red-400' : 'text-emerald-400'}`}>
@@ -450,7 +453,7 @@ export const DecisionActionPanel: React.FC<DecisionActionPanelProps> = ({
                   className="flex items-center gap-2 px-5 py-2 rounded-lg bg-white hover:bg-zinc-200 text-black font-mono font-bold text-xs shadow-md transition-all cursor-pointer disabled:opacity-50"
                 >
                   <CheckCircle2 className="size-3.5 text-emerald-600" />
-                  <span>{isSubmitting ? 'Committing...' : 'Confirm & Commit Override'}</span>
+                  <span>{isSubmitting ? 'Committing...' : isManualDisposition || isResolving ? 'Confirm & Close Alert' : 'Confirm & Commit Override'}</span>
                 </button>
               </div>
             </div>
@@ -510,13 +513,15 @@ export const DecisionActionPanel: React.FC<DecisionActionPanelProps> = ({
               <span className="text-amber-400">Status: Escalated for Tier-2 / Lead review</span>
             ) : isNeedsManual ? (
               <span className="text-purple-400">Status: Automated triage exhausted — manual decision required</span>
+            ) : isPending ? (
+              <span className="text-zinc-300">AI triage pending. You can close this alert manually.</span>
             ) : (
               <span className="text-zinc-300">Status: Actionable analyst review required</span>
             )}
           </div>
 
           {/* Action Button Groups */}
-          <div className="flex items-center gap-2.5">
+          <div className="flex flex-wrap items-center gap-2.5">
             {/* Close Modal Button */}
             <button
               type="button"
@@ -526,104 +531,77 @@ export const DecisionActionPanel: React.FC<DecisionActionPanelProps> = ({
               Close
             </button>
 
-            {/* AWAITING_ANALYST Actions */}
-            {isAwaiting && (
-              <>
-                <button
-                  type="button"
-                  onClick={handleEscalateClick}
-                  disabled={isSubmitting}
-                  className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-amber-950/60 hover:bg-amber-900/60 border border-amber-800/80 text-amber-200 text-xs font-mono font-medium transition-colors"
-                >
-                  <Flame className="size-3.5 text-amber-400" />
-                  <span>Escalate</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => {
-                    setPanelMode('override');
-                    setOverrideTab('parameters');
-                  }}
-                  disabled={isSubmitting}
-                  className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 text-zinc-200 text-xs font-mono font-semibold transition-colors cursor-pointer"
-                >
-                  <Edit3 className="size-3.5 text-zinc-400" />
-                  <span>Override Decision</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={handleApproveClick}
-                  disabled={isSubmitting}
-                  className="flex items-center gap-1.5 px-5 py-2 rounded-lg bg-white hover:bg-zinc-200 text-black text-xs font-mono font-bold shadow-md transition-all cursor-pointer"
-                >
-                  <Check className="size-4 text-emerald-600" />
-                  <span>Approve Assessment</span>
-                </button>
-              </>
+            {supports('RETRY_AI') && (
+              <button
+                type="button"
+                onClick={handleRetryClick}
+                disabled={isSubmitting}
+                className="flex items-center gap-1.5 rounded-lg border border-zinc-700 bg-zinc-900 px-3.5 py-2 text-xs font-mono text-zinc-200 hover:bg-zinc-800 disabled:opacity-50"
+              >
+                <RotateCcw className="size-3.5" /> Retry AI Triage
+              </button>
             )}
-
-            {/* NEEDS_MANUAL_TRIAGE Actions */}
-            {isNeedsManual && (
-              <>
-                <button
-                  type="button"
-                  onClick={handleRetryClick}
-                  disabled={isSubmitting}
-                  className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 text-zinc-200 text-xs font-mono font-medium transition-colors cursor-pointer"
-                >
-                  <RotateCcw className="size-3.5 text-zinc-400" />
-                  <span>Retry AI Triage</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={handleEscalateClick}
-                  disabled={isSubmitting}
-                  className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-amber-950/60 hover:bg-amber-900/60 border border-amber-800/80 text-amber-200 text-xs font-mono font-medium transition-colors cursor-pointer"
-                >
-                  <Flame className="size-3.5 text-amber-400" />
-                  <span>Escalate</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => {
-                    setPanelMode('manual_close');
-                    setOverrideTab('parameters');
-                  }}
-                  disabled={isSubmitting}
-                  className="flex items-center gap-1.5 px-5 py-2 rounded-lg bg-white hover:bg-zinc-200 text-black text-xs font-mono font-bold shadow-md transition-all cursor-pointer"
-                >
-                  <Check className="size-4 text-purple-600" />
-                  <span>Manual Disposition</span>
-                </button>
-              </>
+            {supports('ESCALATE') && (
+              <button
+                type="button"
+                onClick={handleEscalateClick}
+                disabled={isSubmitting}
+                className="flex items-center gap-1.5 rounded-lg border border-amber-800 bg-amber-950/60 px-3.5 py-2 text-xs font-mono text-amber-200 hover:bg-amber-900/60 disabled:opacity-50"
+              >
+                <Flame className="size-3.5" /> Escalate
+              </button>
             )}
-
-            {/* ESCALATED Actions */}
-            {isEscalated && (
-              <>
-                {canResolveEscalation ? (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setPanelMode('resolve_escalation');
-                      setOverrideTab('parameters');
-                    }}
-                    disabled={isSubmitting}
-                    className="flex items-center gap-1.5 px-5 py-2 rounded-lg bg-white hover:bg-zinc-200 text-black text-xs font-mono font-bold shadow-md transition-all cursor-pointer"
-                  >
-                    <Check className="size-4 text-amber-600" />
-                    <span>Resolve Escalation</span>
-                  </button>
-                ) : (
-                  <span className="text-[11px] font-mono text-zinc-500 italic">
-                    Requires Team Lead or Admin role to resolve
-                  </span>
-                )}
-              </>
+            {supports('OVERRIDE') && (
+              <button
+                type="button"
+                onClick={() => setPanelMode('override')}
+                disabled={isSubmitting}
+                className="flex items-center gap-1.5 rounded-lg border border-zinc-700 bg-zinc-900 px-3.5 py-2 text-xs font-mono text-zinc-200 hover:bg-zinc-800 disabled:opacity-50"
+              >
+                <Edit3 className="size-3.5" /> Override Decision
+              </button>
+            )}
+            {supports('APPROVE') && (
+              <button
+                type="button"
+                onClick={handleApproveClick}
+                disabled={isSubmitting}
+                className="flex items-center gap-1.5 rounded-lg bg-white px-5 py-2 text-xs font-mono font-bold text-black hover:bg-zinc-200 disabled:opacity-50"
+              >
+                <Check className="size-4 text-emerald-600" />
+                {assessment?.abstention_triggered || assessment?.effective_verdict === 'NEEDS_ANALYST_REVIEW'
+                  ? 'Confirm Verdict' : 'Approve Assessment'}
+              </button>
+            )}
+            {supports('MANUAL_TRIAGE_CLOSURE') && (
+              <button
+                type="button"
+                onClick={() => {
+                  if (isPending) {
+                    setVerdict('');
+                    setSeverity('');
+                    setSaveExemplar(false);
+                  }
+                  setPanelMode('manual_close');
+                }}
+                disabled={isSubmitting}
+                className="flex items-center gap-1.5 rounded-lg bg-white px-5 py-2 text-xs font-mono font-bold text-black hover:bg-zinc-200 disabled:opacity-50"
+              >
+                <Check className="size-4 text-purple-600" /> Manual Disposition
+              </button>
+            )}
+            {supports('RESOLVE_ESCALATION') && (
+              <button
+                type="button"
+                onClick={() => setPanelMode('resolve_escalation')}
+                disabled={isSubmitting}
+                className="flex items-center gap-1.5 rounded-lg bg-white px-5 py-2 text-xs font-mono font-bold text-black hover:bg-zinc-200 disabled:opacity-50"
+              >
+                <Check className="size-4 text-amber-600" /> Resolve Escalation
+              </button>
+            )}
+            {isEscalated && !supports('RESOLVE_ESCALATION') && (
+              <span className="text-xs font-mono text-zinc-400">Team Lead or Admin can resolve this alert.</span>
             )}
           </div>
         </div>

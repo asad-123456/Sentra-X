@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 _ENV_FILE = Path(__file__).resolve().parent.parent / ".env"
+
+_WEAK_SECRETS = {"", "change-me-in-production", "changeme", "secret"}
 
 
 class Settings(BaseSettings):
@@ -21,7 +24,7 @@ class Settings(BaseSettings):
     DATABASE_URL_ASYNC: str = (
         "postgresql+psycopg_async://sentrax:sentrax@localhost:5432/sentrax"
     )
-    SECRET_KEY: str = "change-me-in-production"
+    SECRET_KEY: str = ""
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 480
     LLM_PROVIDER: str = "gemini"
@@ -40,3 +43,13 @@ class Settings(BaseSettings):
 
 # Singleton used throughout the application
 settings = Settings()
+
+# Warn loudly at startup if the secret key is weak or missing.
+if not settings.DEMO_MODE and settings.SECRET_KEY.lower().strip() in _WEAK_SECRETS:
+    print(
+        "FATAL: SECRET_KEY is empty or a known weak value. "
+        "Generate a strong key with: python -c \"import secrets; print(secrets.token_hex(32))\" "
+        "and set it in backend/.env",
+        file=sys.stderr,
+    )
+    sys.exit(1)

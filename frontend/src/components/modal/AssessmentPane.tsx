@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import type { AlertDetail } from '../../types/sentrax';
 import { SeverityBadge } from '../badges/SeverityBadge';
 import { VerdictBadge } from '../badges/VerdictBadge';
@@ -20,19 +20,26 @@ interface AssessmentPaneProps {
   alertDetail: AlertDetail;
   selectedCitationKey: string | null;
   onSelectCitationKey: (key: string) => void;
+  savedAuditId: string | null;
 }
 
 export const AssessmentPane: React.FC<AssessmentPaneProps> = ({
   alertDetail,
   selectedCitationKey,
   onSelectCitationKey,
+  savedAuditId,
 }) => {
   const alert = alertDetail.alert;
-  const assessment = alertDetail.assessment || alertDetail.ai_assessment;
+  const isPending = alert.status === 'PENDING_REVIEW';
+  const assessment = isPending ? undefined : alertDetail.assessment || alertDetail.ai_assessment;
   const evidence_pack = alertDetail.evidence_pack;
   const injected_exemplars = alertDetail.injected_exemplars || alertDetail.relevant_exemplars || [];
   const correlated_alerts = alertDetail.correlated_alerts || alertDetail.evidence_pack?.temporal_context || [];
   const decision_audit_trail = alertDetail.decision_audit_trail || alertDetail.audit_trail || [];
+  const savedAudit = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (savedAuditId) savedAudit.current?.scrollIntoView({ block: 'center' });
+  }, [savedAuditId]);
 
   return (
     <div className="h-full overflow-y-auto p-5 space-y-6 text-zinc-100 font-mono text-xs pr-4 custom-scrollbar">
@@ -130,7 +137,7 @@ export const AssessmentPane: React.FC<AssessmentPaneProps> = ({
             </div>
             <div className="flex items-center gap-2 text-[11px] text-zinc-400">
               <span className="px-2 py-0.5 rounded bg-zinc-900 border border-zinc-800 text-cyan-300 font-mono">
-                {assessment.model_name || 'Gemini 1.5 Pro'}
+                {assessment.model_name || 'Model unavailable'}
               </span>
               <span>{assessment.latency_ms || 0}ms</span>
             </div>
@@ -181,10 +188,12 @@ export const AssessmentPane: React.FC<AssessmentPaneProps> = ({
         <div className="p-4 rounded-xl bg-zinc-950 border border-zinc-800 space-y-2">
           <div className="flex items-center gap-2 text-zinc-300 font-semibold text-xs">
             <Clock className="size-4 text-amber-400" />
-            <span>Manual Triage Required</span>
+            <span>{isPending ? 'AI Triage Pending' : alert.status === 'NEEDS_MANUAL_TRIAGE' ? 'Manual Triage Required' : 'No Saved AI Assessment'}</span>
           </div>
           <p className="text-zinc-400 text-xs font-sans">
-            This alert bypassed automated AI assessment due to queue policy or retry limit exhaustion. Direct analyst adjudication is required.
+            {isPending ? 'AI is processing this alert. You can enter a manual disposition.' :
+              alert.status === 'NEEDS_MANUAL_TRIAGE' ? 'Enter a manual disposition or retry AI triage.' :
+                'This alert has no saved model assessment.'}
           </p>
         </div>
       )}
@@ -213,6 +222,7 @@ export const AssessmentPane: React.FC<AssessmentPaneProps> = ({
                 <button
                   key={key}
                   type="button"
+                  aria-pressed={isSelected}
                   onClick={() => onSelectCitationKey(key)}
                   className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-mono transition-all cursor-pointer ${
                     isSelected
@@ -236,10 +246,10 @@ export const AssessmentPane: React.FC<AssessmentPaneProps> = ({
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2 text-zinc-200 font-semibold text-xs">
               <BookmarkCheck className="size-4 text-emerald-400" />
-              <span>Matched Few-Shot Calibration Exemplars</span>
+              <span>Exemplars Selected for This Assessment</span>
             </div>
             <span className="text-[10px] text-zinc-500">
-              {injected_exemplars.length} active injected
+              {injected_exemplars.length} selected
             </span>
           </div>
 
@@ -252,7 +262,7 @@ export const AssessmentPane: React.FC<AssessmentPaneProps> = ({
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <span className="text-zinc-300 font-bold font-mono">{ex.id}</span>
-                    <span
+                    {ex.match_tier_support && <span
                       className={`px-1.5 py-0.5 rounded text-[10px] font-mono font-medium ${
                         ex.match_tier_support === 'Tier 1'
                           ? 'bg-emerald-950/80 text-emerald-300 border border-emerald-800/60'
@@ -261,7 +271,7 @@ export const AssessmentPane: React.FC<AssessmentPaneProps> = ({
                     >
                       {ex.match_tier_support}:{' '}
                       {ex.match_tier_support === 'Tier 1' ? 'Exact Signature Match' : 'Asset Fallback'}
-                    </span>
+                    </span>}
                   </div>
                   <span className="text-[10px] text-zinc-500 font-mono">
                     {ex.match_hit_count} historical hits
@@ -284,7 +294,7 @@ export const AssessmentPane: React.FC<AssessmentPaneProps> = ({
                 </div>
 
                 <div className="flex items-center justify-between text-[10px] text-zinc-500 font-mono pt-1">
-                  <span>Author: {ex.created_by}</span>
+                  <span>{ex.is_active ? 'Active' : 'Revoked'}</span>
                   <div className="flex items-center gap-1.5">
                     <VerdictBadge verdict={ex.calibrated_verdict} />
                     <SeverityBadge severity={ex.calibrated_severity} />
@@ -312,7 +322,7 @@ export const AssessmentPane: React.FC<AssessmentPaneProps> = ({
           <div className="space-y-2">
             {correlated_alerts.map((corr) => (
               <div
-                key={corr.id}
+                key={corr.id ?? corr.wazuh_alert_id}
                 className="p-2.5 rounded-lg bg-zinc-900/60 border border-zinc-800/80 flex items-center justify-between gap-3 text-xs"
               >
                 <div className="space-y-0.5 min-w-0">
@@ -327,8 +337,8 @@ export const AssessmentPane: React.FC<AssessmentPaneProps> = ({
                 </div>
 
                 <div className="flex items-center gap-2 shrink-0">
-                  <VerdictBadge verdict={corr.verdict} />
-                  <SeverityBadge severity={corr.severity} />
+                  {corr.verdict && <VerdictBadge verdict={corr.verdict} />}
+                  {corr.severity && <SeverityBadge severity={corr.severity} />}
                 </div>
               </div>
             ))}
@@ -351,10 +361,12 @@ export const AssessmentPane: React.FC<AssessmentPaneProps> = ({
             {decision_audit_trail.map((aud) => (
               <div
                 key={aud.id}
+                ref={aud.id === savedAuditId ? savedAudit : undefined}
+                data-audit-id={aud.id}
                 className="p-3 rounded-lg bg-zinc-900/80 border border-zinc-800 space-y-1.5 text-xs"
               >
                 <div className="flex items-center justify-between">
-                  <span className="font-mono text-zinc-300 font-bold">{aud.username}</span>
+                  <span className="font-mono text-zinc-300 font-bold">{aud.username ?? aud.user_id}</span>
                   <span className="text-[10px] text-zinc-500 font-mono">
                     {new Date(aud.created_at).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })}
                   </span>
@@ -363,7 +375,9 @@ export const AssessmentPane: React.FC<AssessmentPaneProps> = ({
                   <span className="px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-200 font-semibold">
                     {aud.action_taken}
                   </span>
-                  <span className="text-zinc-500 font-sans">→ Final: {aud.final_verdict} ({aud.final_severity})</span>
+                  {aud.final_verdict && aud.final_severity && (
+                    <span className="text-zinc-400 font-sans">Final {aud.final_verdict} ({aud.final_severity})</span>
+                  )}
                 </div>
                 <p className="text-zinc-300 font-sans text-xs italic bg-zinc-950/70 p-2 rounded border border-zinc-850">
                   "{aud.rationale}"

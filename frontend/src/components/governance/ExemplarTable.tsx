@@ -15,7 +15,7 @@ import {
 interface ExemplarTableProps {
   exemplars: FeedbackExemplar[];
   isLoading: boolean;
-  onToggleActive: (id: string | number, active: boolean) => Promise<void>;
+  onToggleActive?: (id: string | number, active: boolean) => Promise<void>;
 }
 
 export const ExemplarTable: React.FC<ExemplarTableProps> = ({
@@ -38,7 +38,7 @@ export const ExemplarTable: React.FC<ExemplarTableProps> = ({
     return (
       String(ex.id).toLowerCase().includes(q) ||
       ex.rule_id.toLowerCase().includes(q) ||
-      ex.process_signature.toLowerCase().includes(q) ||
+      (ex.process_signature ?? '').toLowerCase().includes(q) ||
       ex.rationale.toLowerCase().includes(q) ||
       (ex.created_by ? ex.created_by.toLowerCase().includes(q) : false)
     );
@@ -48,6 +48,7 @@ export const ExemplarTable: React.FC<ExemplarTableProps> = ({
   const revokedCount = exemplars.filter((e) => !e.is_active).length;
 
   const handleActionClick = async (exemplar: FeedbackExemplar) => {
+    if (!onToggleActive) return;
     setUpdatingId(exemplar.id);
     try {
       await onToggleActive(exemplar.id, !exemplar.is_active);
@@ -164,12 +165,12 @@ export const ExemplarTable: React.FC<ExemplarTableProps> = ({
                           {ex.is_active ? (
                             <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-mono font-medium bg-emerald-950/80 text-emerald-300 border border-emerald-800/60">
                               <span className="size-1 rounded-full bg-emerald-400" />
-                              <span>ACTIVE IN PROMPT</span>
+                              <span>ACTIVE</span>
                             </span>
                           ) : (
                             <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-mono font-medium bg-zinc-900 text-zinc-400 border border-zinc-800">
                               <Ban className="size-2.5 text-zinc-500" />
-                              <span>REVOKED (EXCLUDED)</span>
+                              <span>REVOKED</span>
                             </span>
                           )}
                         </div>
@@ -178,8 +179,8 @@ export const ExemplarTable: React.FC<ExemplarTableProps> = ({
                       {/* Target Rule & Process */}
                       <td className="py-3.5 px-4 font-mono">
                         <div className="text-cyan-400 font-semibold">Rule {ex.rule_id}</div>
-                        <div className="text-[11px] text-zinc-300 font-mono truncate max-w-[180px]" title={ex.process_signature}>
-                          {ex.process_signature}
+                        <div className="text-[11px] text-zinc-300 font-mono truncate max-w-[180px]" title={ex.process_signature ?? undefined}>
+                          {ex.process_signature ?? '—'}
                         </div>
                       </td>
 
@@ -218,7 +219,7 @@ export const ExemplarTable: React.FC<ExemplarTableProps> = ({
                           }`}
                         >
                           <Sparkles className="size-2.5" />
-                          <span>{ex.match_tier_support === 'Tier 1' ? 'Tier 1 (Exact)' : 'Tier 2 (Fallback)'}</span>
+                          <span>{ex.match_tier_support === 'Tier 1' ? 'Signature eligible' : 'Tier fallback only'}</span>
                         </span>
                         <div className="text-[10px] text-zinc-400 pt-1">
                           {ex.match_hit_count} historical hits
@@ -227,7 +228,9 @@ export const ExemplarTable: React.FC<ExemplarTableProps> = ({
 
                       {/* Governance Action: Revoke / Restore */}
                       <td className="py-3.5 px-4 text-right">
-                        {ex.is_active ? (
+                        {!onToggleActive ? (
+                          <span className="text-[11px] text-zinc-400">TeamLead only</span>
+                        ) : ex.is_active ? (
                           <button
                             type="button"
                             onClick={() => handleActionClick(ex)}

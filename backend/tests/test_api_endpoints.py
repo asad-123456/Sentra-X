@@ -13,6 +13,11 @@ BACKEND_DIR = Path(__file__).resolve().parent.parent
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
+if __name__ == "__main__":
+    import pytest
+
+    raise SystemExit(pytest.main([__file__, "-s", "-rs"]))
+
 from starlette.testclient import TestClient
 from app.config import settings
 from app.main import app
@@ -94,6 +99,7 @@ def run_all_api_tests():
     # 7b. Decision Submission: OVERRIDE with short rationale (MUST FAIL with HTTP 422)
     short_override = client.post(
         f"/api/v1/alerts/{test_alert_id}/decision",
+        headers={"Authorization": f"Bearer {token}"},
         json={
             "action": "OVERRIDE",
             "final_verdict": "FALSE_POSITIVE",
@@ -107,6 +113,7 @@ def run_all_api_tests():
     # 8. Decision Submission: Valid APPROVE
     approve_res = client.post(
         f"/api/v1/alerts/{test_alert_id}/decision",
+        headers={"Authorization": f"Bearer {token}"},
         json={
             "action": "APPROVE",
             "rationale": "Verified authentic threat activity matching Sysmon event.",
@@ -121,6 +128,7 @@ def run_all_api_tests():
     target_override_alert = "al-9020"
     override_res = client.post(
         f"/api/v1/alerts/{target_override_alert}/decision",
+        headers={"Authorization": f"Bearer {token}"},
         json={
             "action": "OVERRIDE",
             "final_verdict": "FALSE_POSITIVE",
@@ -136,6 +144,7 @@ def run_all_api_tests():
     retry_alert_id = "al-9019"
     retry_res = client.post(
         f"/api/v1/alerts/{retry_alert_id}/decision",
+        headers={"Authorization": f"Bearer {token}"},
         json={"action": "RETRY_AI", "rationale": "Re-running guardrails check on ambiguous telemetry."},
     )
     assert retry_res.status_code == 200, f"RETRY_AI failed: {retry_res.text}"
@@ -230,6 +239,7 @@ def run_all_api_tests():
     target_esc_alert_id = awaiting_items[0]["id"]
     escalate_action = client.post(
         f"/api/v1/alerts/{target_esc_alert_id}/decision",
+        headers={"Authorization": f"Bearer {token}"},
         json={"action": "ESCALATE", "rationale": "Escalating suspicious telemetry to Team Lead."},
     )
     assert escalate_action.status_code == 200
@@ -331,6 +341,7 @@ def run_all_api_tests():
 
     closed_alert_res = client.post(
         f"/api/v1/alerts/{test_alert_id}/decision",
+        headers={"Authorization": f"Bearer {token}"},
         json={"action": "APPROVE"},
     )
     assert closed_alert_res.status_code == 422
@@ -420,10 +431,6 @@ def run_all_api_tests():
     return True
 
 
-def test_all_api_endpoints():
+def test_all_api_endpoints(application_test_database):
     assert run_all_api_tests() is True
-
-
-if __name__ == "__main__":
-    run_all_api_tests()
 

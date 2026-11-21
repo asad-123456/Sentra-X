@@ -81,6 +81,7 @@ class Alert(Base):
         nullable=False,
         server_default=text("0"),
     )
+    triage_generation: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
     alert_timestamp: Mapped[datetime] = mapped_column(
         TIMESTAMP(timezone=True),
         nullable=False,

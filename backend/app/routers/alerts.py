@@ -3,14 +3,11 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
-from fastapi import APIRouter, Depends, HTTPException, Query, status
-from fastapi.security import HTTPAuthorizationCredentials
-from jose import jwt
-from sqlalchemy import desc, func, text
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import desc, func
 from sqlalchemy.orm import Session
 
-from ..auth import security
-from ..config import settings
+from ..auth import get_current_user, require_roles
 from ..database import get_db
 from ..models.alert import Alert
 from ..models.asset import Asset
@@ -19,11 +16,42 @@ from ..models.evidence_pack import EvidencePack
 from ..models.audit import AnalystDecisionAudit
 from ..models.exemplar import FeedbackExemplar
 from ..models.user import User
+from ..schemas.common import Severity, Verdict
+from ..schemas.decision import DecisionRequestDTO
 from ..schemas.queue import PaginatedQueueResponse
 from ..utils import parse_uuid
 from ..worker.jobs import enqueue_triage
 
 router = APIRouter(prefix="/alerts", tags=["Alerts & Triage Queue"])
+
+DECISION_TRANSITIONS = {
+    "APPROVE": ({"AWAITING_ANALYST"}, "CLOSED"),
+    "OVERRIDE": ({"AWAITING_ANALYST"}, "CLOSED"),
+    "ESCALATE": ({"PENDING_REVIEW", "AWAITING_ANALYST", "NEEDS_MANUAL_TRIAGE"}, "ESCALATED"),
+    "RETRY_AI": ({"AWAITING_ANALYST", "NEEDS_MANUAL_TRIAGE"}, "PENDING_REVIEW"),
+    "MANUAL_TRIAGE_CLOSURE": ({"PENDING_REVIEW", "NEEDS_MANUAL_TRIAGE"}, "CLOSED"),
+    "RESOLVE_ESCALATION": ({"ESCALATED"}, "CLOSED"),
+}
+VALID_ASSESSMENT_VERDICTS = set(Verdict)
+VALID_SEVERITIES = set(Severity)
+ESCALATION_ROLES = {"TeamLead", "Admin"}
+
+
+def _can_approve(assessment: AIAssessment | None) -> bool:
+    return (
+        assessment is not None
+        and assessment.effective_verdict in VALID_ASSESSMENT_VERDICTS
+        and assessment.effective_severity in VALID_SEVERITIES
+    )
+
+
+def _available_actions(alert: Alert, user: User | None, assessment: AIAssessment | None) -> list[str]:
+    return [
+        action for action, (states, _) in DECISION_TRANSITIONS.items()
+        if alert.status in states
+        and (action != "APPROVE" or _can_approve(assessment))
+        and (action != "RESOLVE_ESCALATION" or (user is not None and user.role in ESCALATION_ROLES))
+    ]
 
 
 @router.get("", response_model=PaginatedQueueResponse)
@@ -39,6 +67,7 @@ def get_alerts(
     page: int = Query(1, ge=1),
     page_size: int = Query(10, ge=1, le=100),
     db: Session = Depends(get_db),
+    user: User | None = Depends(require_roles("Analyst", "TeamLead", "Admin", demo_open=True)),
 ):
     query = (
         db.query(Alert, Asset, AIAssessment, EvidencePack)
@@ -132,14 +161,16 @@ def get_alerts(
                 "agent_name": asset.hostname,
                 "hostname": asset.hostname,
                 "ip_address": asset.ip_address,
+                "mitre_tactics": alert.mitre_tactics,
+                "mitre_techniques": alert.mitre_techniques,
                 "asset_criticality": asset.criticality_tier,
                 "status": alert.status,
+                "available_actions": _available_actions(alert, user, ai),
                 "ingested_at": str(alert.ingested_at),
                 "effective_verdict": ai.effective_verdict if ai else None,
                 "effective_severity": ai.effective_severity if ai else None,
                 "confidence_score": ai.confidence_score if ai else None,
                 "explanation_snippet": (ai.explanation[:100] + "...") if (ai and ai.explanation) else alert.rule_description,
-                "truncated_explanation": (ai.explanation[:100] + "...") if (ai and ai.explanation) else alert.rule_description,
                 "safety_floor_triggered": ai.safety_floor_triggered if ai else False,
                 "abstention_triggered": ai.abstention_triggered if ai else False,
                 "injection_suspect": ep.injection_suspect if ep else False,
@@ -156,8 +187,11 @@ def get_alerts(
 
 
 @router.get("/counts", response_model=Dict[str, Any])
-def get_alert_counts(db: Session = Depends(get_db)):
-    awaiting = db.query(Alert).filter(Alert.status.in_(["AWAITING_ANALYST", "NEEDS_MANUAL_TRIAGE"])).count()
+def get_alert_counts(
+    db: Session = Depends(get_db),
+    _: User = Depends(require_roles("Analyst", "TeamLead", "Admin", demo_open=True)),
+):
+    awaiting = db.query(Alert).filter(Alert.status.in_(["PENDING_REVIEW", "AWAITING_ANALYST", "NEEDS_MANUAL_TRIAGE"])).count()
     awaiting_analyst_count = db.query(Alert).filter(Alert.status == "AWAITING_ANALYST").count()
     needs_manual_triage_count = db.query(Alert).filter(Alert.status == "NEEDS_MANUAL_TRIAGE").count()
     escalated = db.query(Alert).filter(Alert.status == "ESCALATED").count()
@@ -185,11 +219,10 @@ def get_alert_counts(db: Session = Depends(get_db)):
     )
 
     avg_latency = (
-        db.query(func.avg(AIAssessment.latency_ms))
-        .filter(AIAssessment.latency_ms.isnot(None))
+        db.query(func.avg(func.coalesce(AIAssessment.inference_latency_ms, AIAssessment.latency_ms)))
         .scalar()
     )
-    mean_latency_seconds = round(float(avg_latency or 1200) / 1000.0, 1)
+    mean_latency_seconds = round(float(avg_latency) / 1000.0, 2) if avg_latency is not None else None
 
     return {
         "awaiting": awaiting,
@@ -204,7 +237,11 @@ def get_alert_counts(db: Session = Depends(get_db)):
 
 
 @router.get("/{alert_id}", response_model=Dict[str, Any])
-def get_alert_detail(alert_id: str, db: Session = Depends(get_db)):
+def get_alert_detail(
+    alert_id: str,
+    db: Session = Depends(get_db),
+    current_user: User | None = Depends(require_roles("Analyst", "TeamLead", "Admin", demo_open=True)),
+):
     target_uuid = parse_uuid(alert_id)
     alert = db.query(Alert).filter(Alert.id == target_uuid).first()
     if not alert:
@@ -243,39 +280,36 @@ def get_alert_detail(alert_id: str, db: Session = Depends(get_db)):
             }
         )
 
-    # Fetch relevant few-shot calibration exemplars matching rule_id
-    exemplars = (
-        db.query(FeedbackExemplar)
-        .filter(FeedbackExemplar.rule_id == alert.rule_id, FeedbackExemplar.is_active.is_(True))
-        .order_by(desc(FeedbackExemplar.created_at))
-        .limit(2)
-        .all()
-    )
-
+    saved_ids = evidence_pack.injected_exemplar_ids if evidence_pack else []
+    exemplar_ids = [
+        int(value) for value in saved_ids
+        if type(value) in (str, int)
+        and str(value).isascii() and str(value).isdigit()
+        and len(str(value)) <= 10 and 0 < int(value) <= 2_147_483_647
+    ] if isinstance(saved_ids, list) else []
     exemplar_items = []
-    exemplars_updated = False
-    for ex in exemplars:
-        ex.match_hit_count = (ex.match_hit_count or 0) + 1
-        exemplars_updated = True
-        exemplar_items.append(
-            {
-                "id": ex.id,
-                "rule_id": ex.rule_id,
-                "process_signature": ex.process_signature,
-                "asset_criticality": ex.asset_criticality,
-                "calibrated_verdict": ex.calibrated_verdict,
-                "calibrated_severity": ex.calibrated_severity,
-                "rationale": ex.rationale,
-                "is_active": ex.is_active,
-                "match_hit_count": ex.match_hit_count,
-                "created_at": str(ex.created_at),
-            }
-        )
-    if exemplars_updated:
-        try:
-            db.commit()
-        except Exception:
-            db.rollback()
+    if exemplar_ids:
+        exemplars = db.query(FeedbackExemplar).filter(FeedbackExemplar.id.in_(exemplar_ids)).all()
+        by_id = {ex.id: ex for ex in exemplars}
+        for exemplar_id in dict.fromkeys(exemplar_ids):
+            ex = by_id.get(exemplar_id)
+            if ex is None:
+                continue
+            exemplar_items.append(
+                {
+                    "id": ex.id,
+                    "source_alert_id": str(ex.source_alert_id) if ex.source_alert_id else None,
+                    "rule_id": ex.rule_id,
+                    "process_signature": ex.process_signature,
+                    "asset_criticality": ex.asset_criticality,
+                    "calibrated_verdict": ex.calibrated_verdict,
+                    "calibrated_severity": ex.calibrated_severity,
+                    "rationale": ex.rationale,
+                    "is_active": ex.is_active,
+                    "match_hit_count": ex.match_hit_count,
+                    "created_at": str(ex.created_at),
+                }
+            )
 
     # Prepare EvidencePack payload
     ep_data = None
@@ -287,13 +321,15 @@ def get_alert_detail(alert_id: str, db: Session = Depends(get_db)):
             "raw_wazuh_log": pack_json.get("telemetry_payload", {}),
             "telemetry_payload": pack_json.get("telemetry_payload", {}),
             "alert_metadata": pack_json.get("alert_metadata", {}),
+            "asset_context": pack_json.get("asset_context"),
+            "pack_json": pack_json,
             "mitre_tactics": alert.mitre_tactics or [],
             "mitre_techniques": alert.mitre_techniques or [],
             "asset_criticality": asset.criticality_tier if asset else "MEDIUM",
             "temporal_context": pack_json.get("temporal_context", []),
             "valid_dot_keys": evidence_pack.valid_dot_keys or [],
             "injection_suspect": evidence_pack.injection_suspect,
-            "injected_exemplar_ids": evidence_pack.injected_exemplar_ids or [],
+            "injected_exemplar_ids": exemplar_ids,
             "created_at": str(evidence_pack.created_at),
             "updated_at": str(evidence_pack.updated_at),
         }
@@ -351,11 +387,10 @@ def get_alert_detail(alert_id: str, db: Session = Depends(get_db)):
             "created_at": str(asset.created_at) if asset else str(alert.ingested_at),
             "updated_at": str(asset.updated_at) if asset else str(alert.updated_at),
         },
+        "available_actions": _available_actions(alert, current_user, ai_assessment),
         "evidence_pack": ep_data,
         "ai_assessment": ai_data,
-        "assessment": ai_data,
         "audit_trail": audit_trail,
-        "decision_audit_trail": audit_trail,
         "relevant_exemplars": exemplar_items,
         "injected_exemplars": exemplar_items,
         "correlated_alerts": ep_data.get("temporal_context", []) if ep_data else [],
@@ -365,158 +400,61 @@ def get_alert_detail(alert_id: str, db: Session = Depends(get_db)):
 @router.post("/{alert_id}/decision", response_model=Dict[str, Any])
 def submit_alert_decision(
     alert_id: str,
-    payload: Dict[str, Any],
-    auth: Optional[HTTPAuthorizationCredentials] = Depends(security),
+    payload: DecisionRequestDTO,
+    user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    action = payload.action.value
+    if action == "RESOLVE_ESCALATION" and user.role not in ESCALATION_ROLES:
+        raise HTTPException(status_code=403, detail="Only TeamLead or Admin can resolve escalated alerts.")
+
     target_uuid = parse_uuid(alert_id)
-    alert = db.query(Alert).filter(Alert.id == target_uuid).first()
+    alert = db.query(Alert).filter(Alert.id == target_uuid).populate_existing().with_for_update().first()
     if not alert:
         raise HTTPException(status_code=404, detail=f"Alert with ID {alert_id} not found.")
 
-    action = payload.get("action")
-    if not action:
-        raise HTTPException(status_code=400, detail="Action is required.")
-
-    # Normalise legacy action alias to canonical SRS v1.4 spelling
-    if action == "MANUAL_TRIAGE_CLOSE":
-        action = "MANUAL_TRIAGE_CLOSURE"
-
-    VALID_ACTIONS = {"APPROVE", "OVERRIDE", "ESCALATE", "RETRY_AI", "MANUAL_TRIAGE_CLOSURE", "RESOLVE_ESCALATION"}
-    if action not in VALID_ACTIONS:
+    allowed_states, next_state = DECISION_TRANSITIONS[action]
+    if alert.status not in allowed_states:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"HTTP 422: Invalid action '{action}'. Must be one of: {sorted(VALID_ACTIONS)}.",
+            status_code=422,
+            detail=f"Action {action} is unavailable while the alert is {alert.status}. Refresh to review its current state.",
         )
 
-    # 1. Resolve active user from JWT Bearer token or payload (Authentication First)
-    user = None
-    if auth and auth.credentials:
-        try:
-            token_payload = jwt.decode(
-                auth.credentials, settings.SECRET_KEY, algorithms=[settings.ALGORITHM]
-            )
-            sub = token_payload.get("sub")
-            if sub:
-                user = db.query(User).filter(User.id == uuid.UUID(sub)).first()
-        except Exception:
-            pass
-
-    if not user:
-        if not settings.DEMO_MODE:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="HTTP 401 Unauthorized: Valid authentication token required.",
-            )
-        user_id_raw = payload.get("user_id")
-        if user_id_raw:
-            user_uuid = parse_uuid(str(user_id_raw))
-            user = db.query(User).filter(User.id == user_uuid).first()
-        else:
-            user = db.query(User).first()
-            user_uuid = user.id if user else uuid.uuid4()
-    else:
-        user_uuid = user.id
-
-    # 2. Enforce AC-12 (FR-6): Only TeamLead or Admin can resolve escalated alerts
-    if action == "RESOLVE_ESCALATION":
-        caller_role = user.role if user else "Analyst"
-        if caller_role not in ("TeamLead", "Admin"):
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="HTTP 403 Forbidden: Only TeamLead or Admin can resolve escalated alerts (AC-12, FR-6).",
-            )
-
-    # 3. Enforce state transition rules (SRS v1.4 §6.4, UC-4..8)
-    if alert.status == "CLOSED":
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"HTTP 422: Alert {alert_id} is already CLOSED and cannot be transitioned.",
-        )
-
-    if action == "RESOLVE_ESCALATION" and alert.status != "ESCALATED":
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"HTTP 422: Action RESOLVE_ESCALATION is only valid for alerts in ESCALATED status (current: {alert.status}).",
-        )
-
-    if action == "MANUAL_TRIAGE_CLOSURE" and alert.status != "NEEDS_MANUAL_TRIAGE":
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"HTTP 422: Action MANUAL_TRIAGE_CLOSURE is only valid for alerts in NEEDS_MANUAL_TRIAGE status (current: {alert.status}).",
-        )
-
-    if action in ("APPROVE", "OVERRIDE") and alert.status not in ("AWAITING_ANALYST", "PENDING_REVIEW"):
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"HTTP 422: Action {action} is only valid for alerts in AWAITING_ANALYST status (current: {alert.status}).",
-        )
-
-    rationale = (payload.get("rationale") or "").strip()
-    final_verdict = payload.get("final_verdict")
-    final_severity = payload.get("final_severity")
-
-    # Enforce >= 10 char rationale on actions requiring mandatory justification (FR-6, AC-11)
-    if action in ("OVERRIDE", "MANUAL_TRIAGE_CLOSURE", "RESOLVE_ESCALATION"):
-        if len(rationale) < 10:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail=f"HTTP 422: Mandatory rationale of >= 10 characters required for action '{action}'.",
-            )
-        if not final_verdict or final_verdict not in ("TRUE_POSITIVE", "FALSE_POSITIVE"):
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail=f"HTTP 422: Binary final_verdict ('TRUE_POSITIVE' or 'FALSE_POSITIVE') is required on {action}.",
-            )
-        if not final_severity or final_severity not in ("LOW", "MEDIUM", "HIGH", "CRITICAL"):
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail=f"HTTP 422: Valid final_severity ('LOW', 'MEDIUM', 'HIGH', 'CRITICAL') is required on {action}.",
-            )
-
-    # Get current AI assessment for previous state
     ai = db.query(AIAssessment).filter(AIAssessment.alert_id == alert.id).first()
     prev_verdict = ai.effective_verdict if ai else None
     prev_severity = ai.effective_severity if ai else None
+    rationale = payload.rationale
+    final_verdict = payload.final_verdict.value if payload.final_verdict else None
+    final_severity = payload.final_severity.value if payload.final_severity else None
 
-    # Handle status transition (SRS v1.4 §6.4, FR-6, UC-7)
-    exemplar_created = False
-    if action in ("APPROVE", "OVERRIDE", "MANUAL_TRIAGE_CLOSURE", "RESOLVE_ESCALATION"):
-        alert.status = "CLOSED"
-    elif action == "ESCALATE":
-        alert.status = "ESCALATED"
-    elif action == "RETRY_AI":
-        alert.status = "PENDING_REVIEW"
+    if action == "APPROVE":
+        if ai is None or not _can_approve(ai):
+            raise HTTPException(status_code=422, detail="Approval requires a saved AI assessment with a valid verdict and severity.")
+        if ai.abstention_triggered or prev_verdict == Verdict.NEEDS_ANALYST_REVIEW:
+            if final_verdict is None:
+                raise HTTPException(status_code=422, detail="Select a final verdict for the assessment that needs analyst review.")
+        else:
+            if final_verdict is not None and final_verdict != prev_verdict:
+                raise HTTPException(status_code=409, detail="The verdict differs from the saved assessment. Refresh the alert or use Override.")
+            final_verdict = prev_verdict
+        if final_severity is not None and final_severity != prev_severity:
+            raise HTTPException(status_code=409, detail="The severity differs from the saved assessment. Refresh the alert or use Override.")
+        final_severity = prev_severity
+
+    alert.status = next_state
+    alert.updated_at = datetime.now(timezone.utc)
+    if action == "RETRY_AI":
+        alert.triage_generation += 1
         alert.retry_count = 0
         if ai:
             ai.retry_count = 0
 
-    alert.updated_at = datetime.now(timezone.utc)
-
-    # Handle final disposition on APPROVE (accepts AI verdict/severity or enforces binary choice on NEEDS_ANALYST_REVIEW)
-    if action == "APPROVE":
-        if prev_verdict == "NEEDS_ANALYST_REVIEW":
-            if not final_verdict or final_verdict not in ("TRUE_POSITIVE", "FALSE_POSITIVE"):
-                if settings.DEMO_MODE:
-                    final_verdict = "TRUE_POSITIVE"
-                else:
-                    raise HTTPException(
-                        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                        detail="HTTP 422: Binary final_verdict ('TRUE_POSITIVE' or 'FALSE_POSITIVE') is required when approving an alert under NEEDS_ANALYST_REVIEW.",
-                    )
-        else:
-            final_verdict = final_verdict or prev_verdict
-        final_severity = final_severity or prev_severity
-
-    # If OVERRIDE, or save_as_exemplar / create_exemplar is True, dynamically create feedback exemplar (FR-4, UC-8)
-    should_create_exemplar = (
-        action == "OVERRIDE"
-        or (
-            action in ("APPROVE", "MANUAL_TRIAGE_CLOSURE", "RESOLVE_ESCALATION")
-            and (payload.get("create_exemplar") is True or payload.get("save_as_exemplar") is True)
-        )
+    exemplar_created = (
+        next_state == "CLOSED"
+        and (action == "OVERRIDE" or payload.save_as_exemplar or payload.create_exemplar)
+        and len(rationale) >= 10
     )
-    if should_create_exemplar and final_verdict in ("TRUE_POSITIVE", "FALSE_POSITIVE") and final_severity in ("LOW", "MEDIUM", "HIGH", "CRITICAL") and len(rationale) >= 10:
+    if exemplar_created:
         asset = db.query(Asset).filter(Asset.agent_id == alert.agent_id).first()
         exemplar = FeedbackExemplar(
             source_alert_id=alert.id,
@@ -528,23 +466,22 @@ def submit_alert_decision(
             rationale=rationale,
             is_active=True,
             match_hit_count=0,
-            user_id=user_uuid,
-            created_by=user_uuid,
+            user_id=user.id,
+            created_by=user.id,
         )
         db.add(exemplar)
-        exemplar_created = True
 
     # Record immutable audit entry (SRS §7.2.1: NULL for ESCALATE and RETRY_AI)
     audit_id = uuid.uuid4()
     audit_record = AnalystDecisionAudit(
         id=audit_id,
         alert_id=alert.id,
-        user_id=user_uuid,
+        user_id=user.id,
         action_taken=action,
         previous_verdict=prev_verdict,
         previous_severity=prev_severity,
-        final_verdict=final_verdict if action not in ("ESCALATE", "RETRY_AI") else None,
-        final_severity=final_severity if action not in ("ESCALATE", "RETRY_AI") else None,
+        final_verdict=final_verdict if next_state == "CLOSED" else None,
+        final_severity=final_severity if next_state == "CLOSED" else None,
         rationale=rationale,
         exemplar_created=exemplar_created,
     )
@@ -557,10 +494,10 @@ def submit_alert_decision(
 
     return {
         "id": str(audit_id),
-        "alert_id": str(alert.id),
-        "user_id": str(user_uuid),
-        "username": user.username if user else "analyst_01",
-        "user_role": user.role if user else "Analyst",
+        "alert_id": str(target_uuid),
+        "user_id": str(user.id),
+        "username": user.username,
+        "user_role": user.role,
         "action_taken": action,
         "previous_verdict": prev_verdict,
         "previous_severity": prev_severity,
