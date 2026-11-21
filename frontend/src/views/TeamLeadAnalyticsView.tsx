@@ -87,8 +87,8 @@ export const TeamLeadAnalyticsView: React.FC = () => {
       {/* View Header */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div className="space-y-1">
-          <div className="flex items-center gap-2">
-            <h1 className="text-xl font-bold tracking-tight text-zinc-50 font-mono">
+          <div className="flex flex-wrap items-center gap-2">
+            <h1 className="page-title">
               Triage Analytics &amp; Calibration
             </h1>
             {!live && <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-zinc-900 text-zinc-400 border border-zinc-800">
@@ -107,7 +107,7 @@ export const TeamLeadAnalyticsView: React.FC = () => {
             onClick={handleRefresh}
             disabled={isLoading}
             className="p-2 rounded-lg bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-zinc-400 hover:text-zinc-200 transition-colors cursor-pointer"
-            title="Refresh telemetry"
+            aria-label="Refresh analytics"
           >
             <RotateCcw className={`size-4 ${isLoading ? 'animate-spin text-cyan-400' : ''}`} />
           </button>
@@ -136,12 +136,12 @@ export const TeamLeadAnalyticsView: React.FC = () => {
       {/* Filter Toolbar: Date Presets & Rule Filter */}
       <div className="p-3.5 rounded-xl bg-zinc-950 border border-zinc-850 flex flex-wrap items-center justify-between gap-3">
         {/* Date Presets */}
-        <div className="flex items-center gap-1.5">
+        <div className="flex max-w-full items-center gap-1.5">
           <div className="flex items-center gap-1.5 text-zinc-500 font-mono text-xs pr-2">
             <Calendar className="size-3.5 text-zinc-400" />
             <span className="hidden sm:inline">Range:</span>
           </div>
-          <div className="flex items-center gap-1 p-0.5 bg-zinc-900 rounded-lg border border-zinc-800">
+          <div className="flex flex-wrap items-center gap-1 p-0.5 bg-zinc-900 rounded-lg border border-zinc-800">
             {[
               { id: '7d', label: 'Last 7 Days' },
               { id: '30d', label: 'Last 30 Days' },
@@ -151,7 +151,8 @@ export const TeamLeadAnalyticsView: React.FC = () => {
                 key={p.id}
                 type="button"
                 onClick={() => setDateRange(p.id)}
-                className={`px-3 py-1 rounded-md text-xs font-mono font-medium transition-colors cursor-pointer ${
+                aria-pressed={dateRange === p.id}
+                className={`min-h-8 px-2 sm:px-3 rounded-md text-xs font-medium transition-colors cursor-pointer ${
                   dateRange === p.id
                     ? 'bg-zinc-800 text-zinc-100 border border-zinc-700 shadow-sm'
                     : 'text-zinc-400 hover:text-zinc-200'
@@ -164,7 +165,7 @@ export const TeamLeadAnalyticsView: React.FC = () => {
         </div>
 
         {/* Rule filter */}
-        <div className="flex items-center gap-2">
+        <div className="flex min-w-0 max-w-full items-center gap-2">
           <div className="flex items-center gap-1.5 text-zinc-500 font-mono text-xs">
             <Filter className="size-3.5 text-zinc-400" />
             <span className="hidden sm:inline">Wazuh Rule:</span>
@@ -175,13 +176,13 @@ export const TeamLeadAnalyticsView: React.FC = () => {
               value={selectedRuleId === 'ALL' ? '' : selectedRuleId}
               onChange={(event) => setSelectedRuleId(event.target.value)}
               placeholder="All rules"
-              className="bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-1.5 text-xs font-mono text-zinc-200"
+              className="field"
             />
           ) : <select
             aria-label="Wazuh rule ID"
             value={selectedRuleId}
             onChange={(e) => setSelectedRuleId(e.target.value)}
-            className="bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-1.5 text-xs font-mono text-zinc-200 focus:outline-none focus:border-zinc-700 cursor-pointer"
+            className="field min-w-0"
           >
             <option value="ALL">All Monitored Rules</option>
             <option value="100201">Rule 100201 (Mimikatz Memory Dump)</option>
@@ -196,10 +197,12 @@ export const TeamLeadAnalyticsView: React.FC = () => {
       {analytics?.report_window && (
         <p className="text-xs text-zinc-400">
           Reporting window {analytics.report_window.start_date} to {analytics.report_window.end_date} UTC.
-          {analytics.audit_event_count != null && ` CSV includes all ${analytics.audit_event_count} audit events in this window and rule filter.`}
+          {` ${analytics.report_window.rule_id ? `Wazuh rule ${analytics.report_window.rule_id}.` : 'All Wazuh rules.'}`}
+          {analytics.audit_event_count != null && ` CSV includes ${analytics.audit_event_count} audit events.`}
         </p>
       )}
       {isLoading && <p role="status" className="text-xs text-zinc-400">Loading analytics…</p>}
+      {exportSuccess && <p role="status" className="sr-only">Audit CSV downloaded.</p>}
 
       {/* Error Banners */}
       {exportError && (

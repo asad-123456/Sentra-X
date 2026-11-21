@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import {
   Users,
   UserPlus,
@@ -8,12 +8,14 @@ import {
   AlertCircle,
 } from 'lucide-react';
 import type { User, UserRole } from '../../types/sentrax';
+import { ApiError } from '../../api/client';
+import { Button } from '../ui/button';
 
 interface UserManagementTableProps {
   users: User[];
   onUpdateRole: (userId: string, role: UserRole) => Promise<void>;
   onToggleActive: (userId: string, isActive: boolean) => Promise<void>;
-  onCreateUser: (newUser: Omit<User, 'id' | 'created_at'>) => Promise<void>;
+  onCreateUser: (newUser: Omit<User, 'id' | 'created_at'>) => Promise<string | undefined>;
 }
 
 export const UserManagementTable: React.FC<UserManagementTableProps> = ({
@@ -28,6 +30,8 @@ export const UserManagementTable: React.FC<UserManagementTableProps> = ({
   const [role, setRole] = useState<UserRole>('Analyst');
   const [formError, setFormError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [createdAccount, setCreatedAccount] = useState<{ username: string; password?: string } | null>(null);
+  const usernameField = useRef<HTMLInputElement>(null);
 
   // Confirmation guard modal state
   const [confirmModal, setConfirmModal] = useState<{
@@ -58,25 +62,29 @@ export const UserManagementTable: React.FC<UserManagementTableProps> = ({
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!username.trim() || !email.trim()) {
-      setFormError('Username and email are required.');
+      setFormError('Enter a username and email address.');
+      usernameField.current?.focus();
       return;
     }
     setSubmitting(true);
     setFormError(null);
     try {
-      await onCreateUser({
+      const password = await onCreateUser({
         username: username.trim(),
         email: email.trim(),
         role,
         is_active: true,
       });
+      setCreatedAccount({ username: username.trim(), password });
       setUsername('');
       setEmail('');
       setRole('Analyst');
       setShowAddDrawer(false);
     } catch (err) {
-      console.error('Failed to create user:', err);
-      setFormError('Failed to create user account.');
+      setFormError(err instanceof ApiError && err.status < 500
+        ? err.message
+        : 'Unable to create the account. Check your connection and try again.');
+      usernameField.current?.focus();
     } finally {
       setSubmitting(false);
     }
@@ -95,15 +103,31 @@ export const UserManagementTable: React.FC<UserManagementTableProps> = ({
           </p>
         </div>
 
-        <button
+        {!showAddDrawer && <Button
           type="button"
-          onClick={() => setShowAddDrawer(!showAddDrawer)}
-          className="px-3 py-1.5 rounded-lg bg-zinc-900 border border-zinc-800 text-xs font-mono text-zinc-200 hover:text-zinc-50 hover:bg-zinc-800 transition-colors flex items-center gap-1.5 self-start sm:self-auto"
+          onClick={() => { setCreatedAccount(null); setFormError(null); setShowAddDrawer(true); }}
+          className="self-start sm:self-auto"
         >
           <UserPlus className="size-3.5" />
-          {showAddDrawer ? 'Cancel' : 'Create User'}
-        </button>
+          Create user
+        </Button>}
       </div>
+
+      {createdAccount && (
+        <section aria-labelledby="created-user-title" className="border-b border-border bg-secondary px-4 py-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h3 id="created-user-title" role="status" className="text-sm font-medium">Account created for {createdAccount.username}</h3>
+            <Button variant="ghost" onClick={() => setCreatedAccount(null)}>Dismiss</Button>
+          </div>
+          {createdAccount.password && (
+            <div className="max-w-sm space-y-1">
+              <label htmlFor="new-user-password" className="text-sm">Temporary password</label>
+              <input id="new-user-password" className="field font-mono" readOnly value={createdAccount.password} aria-describedby="new-user-password-note" />
+              <p id="new-user-password-note" className="text-xs text-muted-foreground">Save this password before leaving this tab. It is displayed once.</p>
+            </div>
+          )}
+        </section>
+      )}
 
       {/* Inline Create User Drawer */}
       {showAddDrawer && (
@@ -114,7 +138,7 @@ export const UserManagementTable: React.FC<UserManagementTableProps> = ({
           </div>
 
           {formError && (
-            <div className="p-2.5 rounded bg-red-950/40 border border-red-800/60 text-xs font-mono text-red-300 flex items-center gap-2">
+            <div id="create-user-error" role="alert" className="p-2.5 rounded bg-red-950/40 border border-red-800/60 text-sm text-red-300 flex items-center gap-2">
               <AlertCircle className="size-3.5 shrink-0" />
               {formError}
             </div>
@@ -122,33 +146,45 @@ export const UserManagementTable: React.FC<UserManagementTableProps> = ({
 
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div className="space-y-1">
-              <label className="text-[11px] font-mono text-zinc-400">Username</label>
+              <label htmlFor="new-user-username" className="text-sm text-foreground">Username</label>
               <input
+                id="new-user-username"
+                ref={usernameField}
+                required
+                minLength={3}
+                maxLength={64}
+                pattern="[A-Za-z0-9._\-]+"
+                aria-describedby={formError ? 'new-user-username-limit create-user-error' : 'new-user-username-limit'}
                 type="text"
                 placeholder="e.g. analyst_02"
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
-                className="w-full px-3 py-1.5 bg-zinc-900 border border-zinc-800 rounded-lg text-xs font-mono text-zinc-100 placeholder:text-zinc-600 focus:outline-none focus:border-zinc-600"
+                className="field"
               />
+              <p id="new-user-username-limit" className="text-xs text-muted-foreground">3–64 letters, digits, periods, underscores, or hyphens.</p>
             </div>
 
             <div className="space-y-1">
-              <label className="text-[11px] font-mono text-zinc-400">Email Address</label>
+              <label htmlFor="new-user-email" className="text-sm text-foreground">Email address</label>
               <input
+                id="new-user-email"
+                required
+                aria-describedby={formError ? 'create-user-error' : undefined}
                 type="email"
                 placeholder="e.g. analyst02@sentrax.internal"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                className="w-full px-3 py-1.5 bg-zinc-900 border border-zinc-800 rounded-lg text-xs font-mono text-zinc-100 placeholder:text-zinc-600 focus:outline-none focus:border-zinc-600"
+                className="field"
               />
             </div>
 
             <div className="space-y-1">
-              <label className="text-[11px] font-mono text-zinc-400">Assigned Role</label>
+              <label htmlFor="new-user-role" className="text-sm text-foreground">Assigned role</label>
               <select
+                id="new-user-role"
                 value={role}
                 onChange={(e) => setRole(e.target.value as UserRole)}
-                className="w-full px-3 py-1.5 bg-zinc-900 border border-zinc-800 rounded-lg text-xs font-mono text-zinc-100 focus:outline-none focus:border-zinc-600"
+                className="field"
               >
                 <option value="Analyst">Analyst</option>
                 <option value="TeamLead">TeamLead</option>
@@ -177,7 +213,7 @@ export const UserManagementTable: React.FC<UserManagementTableProps> = ({
       )}
 
       {/* Users Table */}
-      <div className="overflow-x-auto">
+      <div className="table-region" tabIndex={0} role="region" aria-label="User accounts table">
         <table className="w-full text-left text-xs">
           <thead>
             <tr className="bg-zinc-900/60 text-zinc-400 font-mono text-[11px] uppercase tracking-wider border-b border-zinc-800">
@@ -203,6 +239,7 @@ export const UserManagementTable: React.FC<UserManagementTableProps> = ({
                 <td className="py-3 px-4 text-zinc-400">{u.email}</td>
                 <td className="py-3 px-4">
                   <select
+                    aria-label={`Role for ${u.username}`}
                     value={u.role}
                     onChange={(e) => {
                       const targetRole = e.target.value as UserRole;
@@ -214,7 +251,7 @@ export const UserManagementTable: React.FC<UserManagementTableProps> = ({
                         });
                       }
                     }}
-                    className="px-2 py-1 bg-zinc-900 border border-zinc-800 rounded text-xs font-mono text-zinc-200 focus:outline-none focus:border-zinc-600 cursor-pointer"
+                    className="field min-w-24"
                   >
                     <option value="Analyst">Analyst</option>
                     <option value="TeamLead">TeamLead</option>

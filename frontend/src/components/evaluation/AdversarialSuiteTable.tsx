@@ -137,7 +137,7 @@ export const AdversarialSuiteTable: React.FC<AdversarialSuiteTableProps> = ({ pa
       </div>
 
       {/* Table */}
-      <div className="overflow-x-auto">
+      <div className="table-region" tabIndex={0} role="region" aria-label="Benchmark cases table">
         <table className="w-full text-left text-xs">
           <thead>
             <tr className="bg-zinc-900/60 text-zinc-400 font-mono text-[11px] uppercase tracking-wider border-b border-zinc-800">

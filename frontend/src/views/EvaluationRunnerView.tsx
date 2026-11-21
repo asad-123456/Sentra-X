@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { useOutletContext } from 'react-router-dom';
 import {
   Play,
   Download,
@@ -20,8 +21,8 @@ import type {
 import {
   getBenchmarkReport,
   runBenchmarkEvaluation,
-  getSystemConfig,
-  updateSystemConfig,
+  getDemoSystemConfig,
+  updateDemoSystemConfig,
   getUsers,
   updateUserRole,
   toggleUserActive,
@@ -32,27 +33,43 @@ import { ScorecardRibbon } from '../components/evaluation/ScorecardRibbon';
 import { ComparativeMetricsTable } from '../components/evaluation/ComparativeMetricsTable';
 import { AdversarialSuiteTable } from '../components/evaluation/AdversarialSuiteTable';
 import { SystemConfigPanel } from '../components/evaluation/SystemConfigPanel';
+import { RuntimeSettingsPanel } from '../components/evaluation/RuntimeSettingsPanel';
 import { UserManagementTable } from '../components/evaluation/UserManagementTable';
+import type { AppShellContext } from '../components/layout/AppShell';
+import { isLiveBackendConfigured } from '../api/client';
 
 type AdminTab = 'benchmark' | 'system_config';
+const LIVE_MODE = isLiveBackendConfigured();
+
+const getAdminPanelData = () => Promise.all([LIVE_MODE ? null : getDemoSystemConfig(), getUsers()]);
 
 export const EvaluationRunnerView: React.FC = () => {
   const [activeTab, setActiveTab] = useState<AdminTab>('benchmark');
+  const { runtime, refreshRuntime } = useOutletContext<AppShellContext>();
+  const showLiveSettings = LIVE_MODE && activeTab === 'system_config';
 
   // Benchmark State
   const [report, setReport] = useState<EvaluationReport | null>(null);
   const [loadingBenchmark, setLoadingBenchmark] = useState(true);
   const [runningBenchmark, setRunningBenchmark] = useState(false);
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
 
   // System Config & Users State
   const [systemConfig, setSystemConfig] = useState<SystemConfig | null>(null);
-  const [users, setUsers] = useState<User[]>([]);
+  const [users, setUsers] = useState<User[] | null>(null);
   const [loadingConfig, setLoadingConfig] = useState(true);
 
   const [error, setError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [showExportMenu, setShowExportMenu] = useState(false);
   const exportMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!runningBenchmark) return;
+    const started = Date.now();
+    const timer = window.setInterval(() => setElapsedSeconds(Math.floor((Date.now() - started) / 1000)), 1000);
+    return () => window.clearInterval(timer);
+  }, [runningBenchmark]);
 
   // Close export menu when clicking outside
   useEffect(() => {
@@ -89,14 +106,14 @@ export const EvaluationRunnerView: React.FC = () => {
   // Load config & users data
   const loadConfigData = () => {
     setLoadingConfig(true);
-    Promise.all([getSystemConfig(), getUsers()])
+    getAdminPanelData()
       .then(([configData, usersData]) => {
         setSystemConfig(configData);
         setUsers(usersData);
         setLoadingConfig(false);
       })
       .catch((err: unknown) => {
-        const msg = err instanceof Error ? err.message : 'Failed to load system configuration.';
+        const msg = err instanceof Error ? err.message : 'Failed to load user accounts.';
         setError(msg);
         setLoadingConfig(false);
       });
@@ -119,7 +136,7 @@ export const EvaluationRunnerView: React.FC = () => {
         }
       });
 
-    Promise.all([getSystemConfig(), getUsers()])
+    getAdminPanelData()
       .then(([configData, usersData]) => {
         if (!isCancelled) {
           setSystemConfig(configData);
@@ -129,7 +146,7 @@ export const EvaluationRunnerView: React.FC = () => {
       })
       .catch((err: unknown) => {
         if (!isCancelled) {
-          const msg = err instanceof Error ? err.message : 'Failed to load system configuration.';
+          const msg = err instanceof Error ? err.message : 'Failed to load user accounts.';
           setError(msg);
           setLoadingConfig(false);
         }
@@ -141,6 +158,7 @@ export const EvaluationRunnerView: React.FC = () => {
   }, []);
 
   const handleRunBenchmark = async () => {
+    setElapsedSeconds(0);
     setRunningBenchmark(true);
     setActionError(null);
     try {
@@ -156,8 +174,9 @@ export const EvaluationRunnerView: React.FC = () => {
 
   const handleSaveConfig = async (updated: Partial<SystemConfig>) => {
     try {
-      const saved = await updateSystemConfig(updated);
+      const saved = await updateDemoSystemConfig(updated);
       setSystemConfig(saved);
+      refreshRuntime();
     } catch (err) {
       console.error('Failed to update config:', err);
       throw err;
@@ -168,7 +187,7 @@ export const EvaluationRunnerView: React.FC = () => {
     setActionError(null);
     try {
       const updated = await updateUserRole(userId, role);
-      setUsers((prev) => prev.map((u) => (u.id === updated.id ? updated : u)));
+      setUsers((prev) => prev?.map((u) => (u.id === updated.id ? updated : u)) ?? null);
     } catch (err) {
       console.error('Failed to update role:', err);
       setActionError(err instanceof Error ? err.message : 'Failed to update user role.');
@@ -179,7 +198,7 @@ export const EvaluationRunnerView: React.FC = () => {
     setActionError(null);
     try {
       const updated = await toggleUserActive(userId, isActive);
-      setUsers((prev) => prev.map((u) => (u.id === updated.id ? updated : u)));
+      setUsers((prev) => prev?.map((u) => (u.id === updated.id ? updated : u)) ?? null);
     } catch (err) {
       console.error('Failed to toggle active status:', err);
       setActionError(err instanceof Error ? err.message : 'Failed to toggle user status.');
@@ -188,8 +207,9 @@ export const EvaluationRunnerView: React.FC = () => {
 
   const handleCreateUser = async (newUserData: Omit<User, 'id' | 'created_at'>) => {
     try {
-      const created = await createUser(newUserData);
-      setUsers((prev) => [...prev, created]);
+      const { temporary_password: password, ...created } = await createUser(newUserData);
+      setUsers((prev) => [...(prev ?? []), created]);
+      return password;
     } catch (err) {
       console.error('Failed to create user:', err);
       throw err;
@@ -266,23 +286,25 @@ export const EvaluationRunnerView: React.FC = () => {
       {/* Top Header & Execution Actions */}
       <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
         <div>
-          <div className="flex items-center gap-2">
-            <h1 className="text-xl font-bold tracking-tight text-zinc-50 font-mono">
-              Adversarial Benchmark
+          <div className="flex flex-wrap items-center gap-2">
+            <h1 className="page-title">
+              {showLiveSettings ? 'Runtime and accounts' : 'Adversarial Benchmark'}
             </h1>
-            {report?.is_dry_run && (
+            {!showLiveSettings && report?.is_dry_run && (
               <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-zinc-900 text-zinc-400 border border-zinc-800">
-                Dry Run
+                Simulated results
               </span>
             )}
           </div>
-          <p className="text-xs text-zinc-400 mt-0.5">
-            Prompt injection test suite and comparative evaluation scorecard.
-          </p>
+          {!showLiveSettings && (
+            <p className="text-xs text-zinc-400 mt-0.5">
+              Prompt injection test suite and comparative evaluation scorecard.
+            </p>
+          )}
         </div>
 
         {/* Action Buttons */}
-        <div className="flex items-center gap-2 self-start lg:self-auto">
+        <div className={showLiveSettings ? 'hidden' : 'flex flex-wrap items-center gap-2 self-start lg:self-auto'}>
           {/* Run Benchmark CTA */}
           <button
             type="button"
@@ -309,6 +331,7 @@ export const EvaluationRunnerView: React.FC = () => {
               type="button"
               onClick={() => setShowExportMenu(!showExportMenu)}
               disabled={!report}
+              aria-expanded={showExportMenu}
               className="px-3.5 py-2 rounded-lg bg-zinc-900 border border-zinc-800 text-xs font-mono text-zinc-200 hover:text-zinc-50 hover:bg-zinc-800 transition-colors flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
             >
               <Download className="size-3.5" />
@@ -316,7 +339,12 @@ export const EvaluationRunnerView: React.FC = () => {
             </button>
 
             {showExportMenu && (
-              <div className="absolute right-0 mt-2 w-48 rounded-xl bg-zinc-950 border border-zinc-800 shadow-xl py-1 z-50 animate-in fade-in zoom-in-95">
+              <div className="absolute left-0 sm:left-auto sm:right-0 mt-2 w-48 rounded-xl bg-zinc-950 border border-zinc-800 shadow-xl py-1 z-50 animate-in fade-in zoom-in-95" onKeyDown={(event) => {
+                if (event.key === 'Escape') {
+                  setShowExportMenu(false);
+                  exportMenuRef.current?.querySelector('button')?.focus();
+                }
+              }}>
                 <button
                   type="button"
                   onClick={handleExportCSV}
@@ -417,6 +445,12 @@ export const EvaluationRunnerView: React.FC = () => {
       {/* TAB 1: Benchmark Runner & Empirical Scorecard */}
       {activeTab === 'benchmark' && (
         <div className="space-y-6">
+          {runningBenchmark && (
+            <div className="surface flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-3 text-sm">
+              <p role="status">Benchmark running. A previous report stays available during the run.</p>
+              <p className="text-muted-foreground tabular-nums">{elapsedSeconds}s elapsed</p>
+            </div>
+          )}
           {loadingBenchmark ? (
             <div className="py-20 text-center space-y-3">
               <Loader2 className="size-6 animate-spin text-zinc-500 mx-auto" />
@@ -426,13 +460,37 @@ export const EvaluationRunnerView: React.FC = () => {
             </div>
           ) : report ? (
             <>
-              <p className="text-xs text-zinc-400">{report.notice}</p>
-              <ScorecardRibbon report={report} isRunning={runningBenchmark} />
-              <ComparativeMetricsTable metrics={report.comparative_metrics} inconclusive={report.result === 'inconclusive'} />
-              <AdversarialSuiteTable payloads={report.adversarial_suite} />
+              <section aria-labelledby="benchmark-result" className="surface space-y-2 p-4 sm:p-5">
+                <h2 id="benchmark-result" className="text-base font-semibold">
+                  {report.result === 'inconclusive' ? 'Incomplete run' : report.result === 'passed' ? 'Complete · zero-bypass target met' : 'Complete · zero-bypass target missed'}
+                </h2>
+                <p className="text-sm text-muted-foreground">
+                  {report.total_payloads} injection cases{report.accuracy_set_size != null && ` · ${report.accuracy_set_size} classification cases`}
+                  {report.provider && ` · ${report.provider}${report.model ? ` / ${report.model}` : ''}`}
+                </p>
+                <p className="text-sm text-muted-foreground">{report.notice}</p>
+              </section>
+              <ScorecardRibbon report={report} />
+              <details className="surface min-w-0">
+                <summary className="cursor-pointer px-4 py-3 font-medium">Comparative metrics</summary>
+                <ComparativeMetricsTable metrics={report.comparative_metrics} inconclusive={report.result === 'inconclusive'} />
+              </details>
+              <details className="surface min-w-0">
+                <summary className="cursor-pointer px-4 py-3 font-medium">Per-case results</summary>
+                <AdversarialSuiteTable payloads={report.adversarial_suite} />
+              </details>
             </>
           ) : (
-            <p className="text-sm text-zinc-400">Run the benchmark to see results.</p>
+            <section className="surface space-y-2 p-4 sm:p-6">
+              <h2 className="font-semibold">No benchmark report yet</h2>
+              <p className="text-sm text-muted-foreground">The benchmark compares raw and guarded inference on 30 synthetic injection cases and 30 synthetic labelled alerts.</p>
+              <p className="text-sm text-muted-foreground">
+                {runtime.status === 'ready' && runtime.settings.llm_provider
+                  ? `Worker configuration: ${runtime.settings.llm_provider}${runtime.settings.model_name ? ` / ${runtime.settings.model_name}` : ''}.`
+                  : 'Worker configuration is currently unavailable.'}
+                {' '}If cases fail to complete, the report is marked incomplete and does not receive a pass result.
+              </p>
+            </section>
           )}
         </div>
       )}
@@ -440,25 +498,27 @@ export const EvaluationRunnerView: React.FC = () => {
       {/* TAB 2: System Configuration & Role Management */}
       {activeTab === 'system_config' && (
         <div className="space-y-6">
-          {loadingConfig || !systemConfig ? (
+          {LIVE_MODE && <RuntimeSettingsPanel runtime={runtime} onRefresh={refreshRuntime} />}
+          {loadingConfig ? (
             <div className="py-20 text-center space-y-3">
               <Loader2 className="size-6 animate-spin text-zinc-500 mx-auto" />
               <div className="text-xs font-mono text-zinc-500">
-                Loading system configuration and user accounts...
+                Loading user accounts...
               </div>
             </div>
           ) : (
             <>
-              {/* SIEM & Inference Configuration Panel */}
-              <SystemConfigPanel config={systemConfig} onSave={handleSaveConfig} />
-
-              {/* User Accounts & Role Management Table */}
-              <UserManagementTable
-                users={users}
-                onUpdateRole={handleUpdateRole}
-                onToggleActive={handleToggleActive}
-                onCreateUser={handleCreateUser}
-              />
+              {!LIVE_MODE && systemConfig && (
+                <SystemConfigPanel config={systemConfig} onSave={handleSaveConfig} />
+              )}
+              {users && (
+                <UserManagementTable
+                  users={users}
+                  onUpdateRole={handleUpdateRole}
+                  onToggleActive={handleToggleActive}
+                  onCreateUser={handleCreateUser}
+                />
+              )}
             </>
           )}
         </div>

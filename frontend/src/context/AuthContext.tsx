@@ -4,7 +4,7 @@
 
 import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import type { User, UserRole } from '../types/sentrax';
-import { DEMO_USERS } from '../mock/demoData';
+import { DEMO_USERS } from '../mock/demoUsers';
 import { apiClient, isLiveBackendConfigured } from '../api/client';
 
 interface LoginApiResponse {
@@ -16,6 +16,7 @@ interface AuthContextType {
   user: User | null;
   token: string | null;
   isLoading: boolean;
+  sessionExpired: boolean;
   login: (usernameOrEmail: string, password: string) => Promise<void>;
   logout: () => void;
   switchDemoRole?: (role: UserRole) => void;
@@ -42,10 +43,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   });
   const [isRestoring, setIsRestoring] = useState(() => LIVE_MODE && !!localStorage.getItem(TOKEN_KEY));
   const [isSigningIn, setIsSigningIn] = useState(false);
+  const [sessionExpired, setSessionExpired] = useState(false);
 
   const logout = useCallback(() => {
     localStorage.removeItem(TOKEN_KEY);
     setSession(null);
+    setSessionExpired(false);
   }, []);
 
   useEffect(() => {
@@ -58,7 +61,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const isCurrentToken = () => !signal.aborted && localStorage.getItem(TOKEN_KEY) === token;
 
     const handleUnauthorized = (event: Event) => {
-      if ((event as CustomEvent<string>).detail === localStorage.getItem(TOKEN_KEY)) logout();
+      if ((event as CustomEvent<string>).detail === localStorage.getItem(TOKEN_KEY)) {
+        logout();
+        setSessionExpired(true);
+      }
     };
     window.addEventListener('sentrax:unauthorized', handleUnauthorized);
 
@@ -83,6 +89,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const startSession = (user: User, token: string) => {
     localStorage.setItem(TOKEN_KEY, token);
+    setSessionExpired(false);
     setSession({ user, token });
   };
 
@@ -135,6 +142,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         user,
         token,
         isLoading,
+        sessionExpired,
         login,
         logout,
         switchDemoRole,

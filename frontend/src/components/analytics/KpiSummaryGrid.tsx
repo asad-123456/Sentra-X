@@ -32,47 +32,52 @@ export const KpiSummaryGrid: React.FC<KpiSummaryGridProps> = ({ summary, isLoadi
     );
   }
 
-  const percent = (value: number | null) => value == null ? '—' : `${value.toFixed(1)}%`;
+  const percent = (value: number | null) => value == null ? 'Unavailable' : `${value.toFixed(1)}%`;
+  const overrideTotal = summary.approved_count == null ? null : summary.approved_count + summary.overridden_count;
+  const agreements = summary.confusion_matrix.tp_tp + summary.confusion_matrix.fp_fp;
 
   const kpis = [
     {
-      label: 'CLOSURE DECISIONS',
+      label: 'Closure decisions',
       value: summary.total_closed.toLocaleString(),
       subtext: 'Recorded in the audit trail',
       icon: FileCheck2,
       accent: 'text-zinc-100',
     },
     {
-      label: 'AI AGREEMENT RATE',
-      value: percent(summary.agreement_rate),
-      subtext: `${summary.comparison_count} binary verdict comparisons`,
+      label: 'AI agreement rate',
+      value: summary.agreement_rate == null ? 'No comparable decisions' : percent(summary.agreement_rate),
+      subtext: `${agreements} agreements across ${summary.comparison_count} binary verdict comparisons`,
       icon: CheckCircle2,
       accent: 'text-emerald-400',
     },
     {
-      label: 'ANALYST OVERRIDE RATE',
-      value: percent(summary.override_rate),
-      subtext: `${summary.overridden_count} override${summary.overridden_count === 1 ? '' : 's'} among approvals and overrides`,
+      label: 'Analyst override rate',
+      value: summary.override_rate == null ? 'No approvals or overrides' : percent(summary.override_rate),
+      subtext: `${summary.overridden_count} overrides${overrideTotal === null ? ' among approvals and overrides' : ` across ${overrideTotal} approvals and overrides`}`,
       icon: Sliders,
       accent: 'text-cyan-400',
     },
     {
-      label: 'CURRENT ESCALATION & FALLBACK',
-      value: `${percent(summary.escalated_rate)} / ${percent(summary.manual_triage_rate)}`,
-      subtext: 'Escalated / manual triage among alerts received',
+      label: 'Current escalation and fallback',
+      value: summary.escalated_rate == null && summary.manual_triage_rate == null
+        ? 'No alerts received' : `${percent(summary.escalated_rate)} / ${percent(summary.manual_triage_rate)}`,
+      subtext: summary.escalation_count == null || summary.manual_fallback_count == null
+        ? 'Escalated / manual triage among alerts received'
+        : `${summary.escalation_count} escalated / ${summary.manual_fallback_count} in manual triage among alerts received`,
       icon: Flame,
       accent: 'text-amber-400',
     },
     {
-      label: 'GUARDRAIL INTERVENTIONS',
+      label: 'Guardrail interventions',
       value: summary.guardrail_interventions.toLocaleString(),
       subtext: 'Assessments with a safety floor or abstention',
       icon: ShieldAlert,
       accent: 'text-red-400',
     },
     {
-      label: 'MEAN INFERENCE LATENCY',
-      value: summary.mean_latency_seconds == null ? '—' : `${summary.mean_latency_seconds.toFixed(1)}s`,
+      label: 'Mean inference latency',
+      value: summary.mean_latency_seconds == null ? 'No recorded latency' : `${summary.mean_latency_seconds.toFixed(1)}s`,
       subtext: 'Recorded model call latency',
       icon: Clock,
       accent: 'text-zinc-200',
@@ -86,20 +91,20 @@ export const KpiSummaryGrid: React.FC<KpiSummaryGridProps> = ({ summary, isLoadi
         return (
           <div
             key={idx}
-            className="p-4 rounded-xl bg-zinc-950 border border-zinc-850 hover:border-zinc-750 transition-all space-y-2 flex flex-col justify-between"
+            className="surface p-4 space-y-2 flex flex-col justify-between"
           >
             <div className="flex items-center justify-between gap-2">
-              <span className="text-[10px] font-mono text-zinc-400 tracking-wider">
+              <span className="text-xs font-medium text-muted-foreground">
                 {kpi.label}
               </span>
               <Icon className="size-3.5 text-zinc-500 shrink-0" />
             </div>
 
             <div className="space-y-0.5">
-              <div className={`text-xl font-bold font-mono tracking-tight ${kpi.accent}`}>
+              <div className={`text-lg font-semibold tabular-nums tracking-tight ${/\d/.test(kpi.value) ? kpi.accent : 'text-foreground'}`}>
                 {kpi.value}
               </div>
-              <div className="text-[11px] text-zinc-400 font-sans">
+              <div className="text-xs text-muted-foreground">
                 {kpi.subtext}
               </div>
             </div>

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { lazy, Suspense } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider } from './context/AuthContext';
 import { ErrorBoundary } from './components/layout/ErrorBoundary';
@@ -6,9 +6,11 @@ import { AppShell } from './components/layout/AppShell';
 import { ProtectedRoute } from './components/layout/ProtectedRoute';
 import { LoginView } from './views/LoginView';
 import { TriageQueueView } from './views/TriageQueueView';
-import { TeamLeadAnalyticsView } from './views/TeamLeadAnalyticsView';
-import { GovernanceView } from './views/GovernanceView';
-import { EvaluationRunnerView } from './views/EvaluationRunnerView';
+
+const TeamLeadAnalyticsView = lazy(() => import('./views/TeamLeadAnalyticsView').then((module) => ({ default: module.TeamLeadAnalyticsView })));
+const GovernanceView = lazy(() => import('./views/GovernanceView').then((module) => ({ default: module.GovernanceView })));
+const EvaluationRunnerView = lazy(() => import('./views/EvaluationRunnerView').then((module) => ({ default: module.EvaluationRunnerView })));
+const pageLoading = <p role="status" className="surface p-4 text-sm text-muted-foreground">Loading workspace…</p>;
 
 export default function App(): React.JSX.Element {
   return (
@@ -45,7 +47,7 @@ export default function App(): React.JSX.Element {
                 path="/analytics"
                 element={
                   <ProtectedRoute allowedRoles={['TeamLead', 'Admin']}>
-                    <TeamLeadAnalyticsView />
+                    <Suspense fallback={pageLoading}><TeamLeadAnalyticsView /></Suspense>
                   </ProtectedRoute>
                 }
               />
@@ -55,7 +57,7 @@ export default function App(): React.JSX.Element {
                 path="/governance"
                 element={
                   <ProtectedRoute allowedRoles={['TeamLead', 'Admin']}>
-                    <GovernanceView />
+                    <Suspense fallback={pageLoading}><GovernanceView /></Suspense>
                   </ProtectedRoute>
                 }
               />
@@ -65,7 +67,7 @@ export default function App(): React.JSX.Element {
                 path="/admin/evaluation"
                 element={
                   <ProtectedRoute allowedRoles={['Admin']}>
-                    <EvaluationRunnerView />
+                    <Suspense fallback={pageLoading}><EvaluationRunnerView /></Suspense>
                   </ProtectedRoute>
                 }
               />

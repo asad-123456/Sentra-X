@@ -347,24 +347,23 @@ def run_all_api_tests():
     assert closed_alert_res.status_code == 422
     print("✅ PASS: [UC-4] Decision on already CLOSED alert strictly rejected with HTTP 422")
 
-    # 17. System Configuration: Database Persistence & Thread Safety
+    # 17. Historical configuration remains readable and runtime writes are rejected.
     config_res = client.get("/api/v1/admin/config", headers={"Authorization": f"Bearer {admin_token}"})
     assert config_res.status_code == 200
     current_cfg = config_res.json()
     assert "wazuh_endpoint" in current_cfg
     assert "abstention_threshold" in current_cfg
-    print("✅ PASS: [GET /api/v1/admin/config] Loaded persistent system configuration from PostgreSQL")
+    print("✅ PASS: [GET /api/v1/admin/config] Loaded historical configuration from PostgreSQL")
 
     patch_cfg_res = client.patch(
         "/api/v1/admin/config",
         headers={"Authorization": f"Bearer {admin_token}"},
         json={"polling_interval_seconds": 45, "min_rule_level": 5},
     )
-    assert patch_cfg_res.status_code == 200
-    updated_cfg = patch_cfg_res.json()
-    assert updated_cfg["polling_interval_seconds"] == 45
-    assert updated_cfg["min_rule_level"] == 5
-    print("✅ PASS: [PATCH /api/v1/admin/config] Updated persistent configuration in PostgreSQL")
+    assert patch_cfg_res.status_code == 405
+    assert patch_cfg_res.headers["Allow"] == "GET"
+    assert client.get("/api/v1/admin/config", headers={"Authorization": f"Bearer {admin_token}"}).json() == current_cfg
+    print("✅ PASS: [PATCH /api/v1/admin/config] Rejected write and preserved historical settings")
 
     # 18. Security Hardening: Unauthenticated Access Prohibited when DEMO_MODE=False
     print("\n--- Verifying Production Role-Guard Hardening (DEMO_MODE=False) ---")

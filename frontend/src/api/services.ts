@@ -29,37 +29,11 @@ import type {
   EvaluationReport,
   BenchmarkPayload,
   SystemConfig,
+  RuntimeSettings,
 } from '../types/sentrax';
 
-import {
-  INITIAL_ALERTS,
-  INITIAL_ASSETS,
-  INITIAL_EVIDENCE_PACKS,
-  INITIAL_ASSESSMENTS,
-  INITIAL_EXEMPLARS,
-  INITIAL_AUDIT_TRAIL,
-  INITIAL_ANALYTICS,
-  BENCHMARK_30_PAYLOADS,
-  SAMPLE_CORRELATED_ALERTS,
-  DEMO_USERS,
-  INITIAL_SYSTEM_CONFIG,
-} from '../mock/demoData';
-
-// ---------------------------------------------------------------------------
-// In-Memory Reactive Store (Clone to protect pristine seed data)
-// ---------------------------------------------------------------------------
-
-const storeAlerts: Alert[] = JSON.parse(JSON.stringify(INITIAL_ALERTS));
-const storeAssets: Asset[] = JSON.parse(JSON.stringify(INITIAL_ASSETS));
-const storeExemplars: FeedbackExemplar[] = JSON.parse(JSON.stringify(INITIAL_EXEMPLARS));
-const storeAuditTrail: AnalystDecisionAudit[] = JSON.parse(JSON.stringify(INITIAL_AUDIT_TRAIL));
-const storeEvidencePacks = JSON.parse(JSON.stringify(INITIAL_EVIDENCE_PACKS));
-const storeAssessments: typeof INITIAL_ASSESSMENTS = JSON.parse(JSON.stringify(INITIAL_ASSESSMENTS));
-const storeAnalytics: AnalyticsSummary = JSON.parse(JSON.stringify(INITIAL_ANALYTICS));
-const storeUsers: User[] = JSON.parse(JSON.stringify(DEMO_USERS));
-let storeSystemConfig: SystemConfig = JSON.parse(JSON.stringify(INITIAL_SYSTEM_CONFIG));
-let storeTotalOverrides = 24;
-let storeTotalAgreements = Math.round(((storeAnalytics.agreement_rate ?? 0) / 100) * storeAnalytics.total_closed);
+// The offline store starts at the first demo request and is shared across demo routes.
+const loadDemoStore = () => import('../mock/demoStore');
 
 // Helper: simulated async latency (50-100ms) for realistic UX transitions
 const simulateLatency = async (ms = 80) => {
@@ -102,9 +76,10 @@ export async function getAlerts(filters: QueueFilters, signal?: AbortSignal): Pr
   }
 
   await simulateLatency(120);
+  const { demoStore } = await loadDemoStore();
 
   // 1. Filter by Tab & SubStatus
-  const filtered = storeAlerts.filter((alert) => {
+  const filtered = demoStore.alerts.filter((alert) => {
     if (filters.tab === 'awaiting') {
       if (filters.subStatus === 'AWAITING_ANALYST') {
         return alert.status === 'AWAITING_ANALYST';
@@ -126,9 +101,9 @@ export async function getAlerts(filters: QueueFilters, signal?: AbortSignal): Pr
 
   // 2. Map to AlertListItem view model
   let listItems: AlertListItem[] = filtered.map((alert) => {
-    const assessment = storeAssessments[alert.id];
-    const evidence = storeEvidencePacks[alert.id];
-    const asset = storeAssets.find((a) => a.agent_id === alert.agent_id);
+    const assessment = demoStore.assessments[alert.id];
+    const evidence = demoStore.evidencePacks[alert.id];
+    const asset = demoStore.assets.find((a) => a.agent_id === alert.agent_id);
 
     return {
       ...alert,
@@ -219,6 +194,7 @@ export async function getQueueCounts(signal?: AbortSignal): Promise<QueueCounts>
   }
 
   await simulateLatency(40);
+  const { demoStore } = await loadDemoStore();
 
   let awaiting = 0;
   let escalated = 0;
@@ -227,10 +203,10 @@ export async function getQueueCounts(signal?: AbortSignal): Promise<QueueCounts>
   let abstentionWarnings = 0;
   let awaitingAnalystCount = 0;
   let needsManualTriageCount = 0;
-  const latencies = Object.values(storeAssessments).map((assessment) => assessment.latency_ms);
+  const latencies = Object.values(demoStore.assessments).map((assessment) => assessment.latency_ms);
 
-  for (const alert of storeAlerts) {
-    const assessment = storeAssessments[alert.id];
+  for (const alert of demoStore.alerts) {
+    const assessment = demoStore.assessments[alert.id];
     if (alert.status === 'PENDING_REVIEW') {
       awaiting++;
     } else if (alert.status === 'AWAITING_ANALYST' || alert.status === 'NEEDS_MANUAL_TRIAGE') {
@@ -293,15 +269,16 @@ export async function getAlertDetail(alertId: string, signal?: AbortSignal, role
   }
 
   await simulateLatency(80);
+  const { demoStore } = await loadDemoStore();
 
-  const alert = storeAlerts.find((a) => a.id === alertId);
+  const alert = demoStore.alerts.find((a) => a.id === alertId);
   if (!alert) {
     throw new ApiError(404, `Alert with ID "${alertId}" not found.`);
   }
 
-  let evidencePack = storeEvidencePacks[alertId];
+  let evidencePack = demoStore.evidencePacks[alertId];
   if (!evidencePack) {
-    const asset = storeAssets.find((a) => a.agent_id === alert.agent_id);
+    const asset = demoStore.assets.find((a) => a.agent_id === alert.agent_id);
     evidencePack = {
       id: `ep-${alert.id}`,
       alert_id: alert.id,
@@ -327,14 +304,14 @@ export async function getAlertDetail(alertId: string, signal?: AbortSignal, role
         agent: { id: alert.agent_id, name: alert.agent_name, ip: alert.src_ip || '10.0.1.5' },
         full_log: alert.rule_description,
       },
-      temporal_context: SAMPLE_CORRELATED_ALERTS[alertId] || [],
+      temporal_context: demoStore.correlatedAlerts[alertId] || [],
       injected_exemplar_ids: [],
       injection_suspect: false,
       created_at: alert.ingested_at,
     };
   }
 
-  let assessment = storeAssessments[alertId];
+  let assessment = demoStore.assessments[alertId];
   if (!assessment) {
     assessment = {
       id: `ai-${alert.id}`,
@@ -358,21 +335,21 @@ export async function getAlertDetail(alertId: string, signal?: AbortSignal, role
   }
 
   // Load injected exemplars
-  const injectedExemplars = storeExemplars.filter((ex) =>
+  const injectedExemplars = demoStore.exemplars.filter((ex) =>
     evidencePack.injected_exemplar_ids.some(
       (id: number | string) => String(id) === String(ex.id)
     )
   );
 
   // Load correlated alerts
-  const correlatedAlerts = evidencePack.temporal_context || SAMPLE_CORRELATED_ALERTS[alertId] || [];
+  const correlatedAlerts = evidencePack.temporal_context || demoStore.correlatedAlerts[alertId] || [];
 
   // Load audit trail for this alert
-  const decisionAuditTrail = storeAuditTrail.filter((aud) => aud.alert_id === alertId);
+  const decisionAuditTrail = demoStore.auditTrail.filter((aud) => aud.alert_id === alertId);
 
   return {
     alert,
-    available_actions: fixtureActions(alert.status, role, storeAssessments[alertId]),
+    available_actions: fixtureActions(alert.status, role, demoStore.assessments[alertId]),
     evidence_pack: evidencePack,
     assessment,
     ai_assessment: assessment,           // BUG-N10 fix: alias for live-path parity
@@ -411,17 +388,18 @@ export async function submitDecision(
   }
 
   await simulateLatency(100);
+  const { demoStore } = await loadDemoStore();
 
   if (!payload.alert_id) {
     throw new ApiError(400, 'alert_id is required to submit a decision.');
   }
 
-  const alert = storeAlerts.find((a) => a.id === payload.alert_id);
+  const alert = demoStore.alerts.find((a) => a.id === payload.alert_id);
   if (!alert) {
     throw new ApiError(404, `Alert with ID "${payload.alert_id}" not found.`);
   }
 
-  const assessment = storeAssessments[payload.alert_id];
+  const assessment = demoStore.assessments[payload.alert_id];
   if (!fixtureActions(alert.status, user.role, assessment).includes(payload.action)) {
     throw new ApiError(422, 'This action is unavailable for the current alert. Refresh the alert to review its state.');
   }
@@ -482,13 +460,13 @@ export async function submitDecision(
     created_at: new Date().toISOString(),
   };
 
-  storeAuditTrail.unshift(auditEntry);
+  demoStore.auditTrail.unshift(auditEntry);
 
   // If override or saved as exemplar, register dynamic few-shot exemplar (FR-4)
   if (auditEntry.exemplar_created) {
-    const asset = storeAssets.find((a) => a.agent_id === alert.agent_id);
+    const asset = demoStore.assets.find((a) => a.agent_id === alert.agent_id);
     const newExemplar: FeedbackExemplar = {
-      id: `EX-${100 + storeExemplars.length + 1}`,
+      id: `EX-${100 + demoStore.exemplars.length + 1}`,
       source_alert_id: alert.id,
       rule_id: alert.rule_id,
       process_signature: alert.process_signature || 'process execution',
@@ -502,28 +480,28 @@ export async function submitDecision(
       created_by: `${user.username} (${user.role})`,
       created_at: new Date().toISOString(),
     };
-    storeExemplars.unshift(newExemplar);
+    demoStore.exemplars.unshift(newExemplar);
 
     // Update analytics override count
-    storeTotalOverrides += 1;
-    storeAnalytics.overridden_count = storeTotalOverrides;
-    storeAnalytics.total_closed += 1;
-    storeAnalytics.override_rate = Number(
-      ((storeTotalOverrides / storeAnalytics.total_closed) * 100).toFixed(1)
+    demoStore.totalOverrides += 1;
+    demoStore.analytics.overridden_count = demoStore.totalOverrides;
+    demoStore.analytics.total_closed += 1;
+    demoStore.analytics.override_rate = Number(
+      ((demoStore.totalOverrides / demoStore.analytics.total_closed) * 100).toFixed(1)
     );
-    storeAnalytics.agreement_rate = Number(
-      ((storeTotalAgreements / storeAnalytics.total_closed) * 100).toFixed(1)
+    demoStore.analytics.agreement_rate = Number(
+      ((demoStore.totalAgreements / demoStore.analytics.total_closed) * 100).toFixed(1)
     );
   } else if (newStatus === 'CLOSED') {
     if (payload.action === 'APPROVE') {
-      storeTotalAgreements += 1;
+      demoStore.totalAgreements += 1;
     }
-    storeAnalytics.total_closed += 1;
-    storeAnalytics.agreement_rate = Number(
-      ((storeTotalAgreements / storeAnalytics.total_closed) * 100).toFixed(1)
+    demoStore.analytics.total_closed += 1;
+    demoStore.analytics.agreement_rate = Number(
+      ((demoStore.totalAgreements / demoStore.analytics.total_closed) * 100).toFixed(1)
     );
-    storeAnalytics.override_rate = Number(
-      ((storeTotalOverrides / storeAnalytics.total_closed) * 100).toFixed(1)
+    demoStore.analytics.override_rate = Number(
+      ((demoStore.totalOverrides / demoStore.analytics.total_closed) * 100).toFixed(1)
     );
   }
 
@@ -563,29 +541,30 @@ export async function getAnalytics(dateRange = '30d', ruleId?: string, signal?: 
   }
 
   await simulateLatency(90);
+  const { demoStore } = await loadDemoStore();
 
   // Filter trendline based on dateRange
-  let filteredTrend = [...storeAnalytics.trendline];
+  let filteredTrend = [...demoStore.analytics.trendline];
   if (dateRange === '7d') {
-    filteredTrend = storeAnalytics.trendline.slice(-3);
+    filteredTrend = demoStore.analytics.trendline.slice(-3);
   } else if (dateRange === '30d') {
-    filteredTrend = storeAnalytics.trendline.slice(-5);
+    filteredTrend = demoStore.analytics.trendline.slice(-5);
   }
 
   // Adjust metrics if a specific rule is selected
   if (ruleId && ruleId !== 'ALL') {
     const isHighRule = ruleId === '100201' || ruleId === '100230';
     return {
-      ...storeAnalytics,
+      ...demoStore.analytics,
       trendline: filteredTrend,
       agreement_rate: isHighRule ? 94.2 : 88.5,
       override_rate: isHighRule ? 5.8 : 11.5,
-      total_closed: Math.round(storeAnalytics.total_closed * (isHighRule ? 0.4 : 0.25)),
+      total_closed: Math.round(demoStore.analytics.total_closed * (isHighRule ? 0.4 : 0.25)),
     };
   }
 
   return {
-    ...storeAnalytics,
+    ...demoStore.analytics,
     trendline: filteredTrend,
   };
 }
@@ -602,6 +581,7 @@ export async function exportAuditCsv(reportWindow?: AnalyticsWindow): Promise<st
   }
 
   await simulateLatency(100);
+  const { demoStore } = await loadDemoStore();
 
   const headers = [
     'audit_id',
@@ -618,8 +598,8 @@ export async function exportAuditCsv(reportWindow?: AnalyticsWindow): Promise<st
     'rationale',
   ];
 
-  const rows = storeAuditTrail.map((entry) => {
-    const alert = storeAlerts.find((a) => a.id === entry.alert_id);
+  const rows = demoStore.auditTrail.map((entry) => {
+    const alert = demoStore.alerts.find((a) => a.id === entry.alert_id);
     return [
       `"${entry.id}"`,
       `"${entry.created_at}"`,
@@ -649,7 +629,8 @@ export async function getExemplars(): Promise<FeedbackExemplar[]> {
   }
 
   await simulateLatency(60);
-  return storeExemplars;
+  const { demoStore } = await loadDemoStore();
+  return demoStore.exemplars;
 }
 
 export async function toggleExemplarActive(
@@ -664,7 +645,8 @@ export async function toggleExemplarActive(
   }
 
   await simulateLatency(70);
-  const exemplar = storeExemplars.find((e) => String(e.id) === String(exemplarId));
+  const { demoStore } = await loadDemoStore();
+  const exemplar = demoStore.exemplars.find((e) => String(e.id) === String(exemplarId));
   if (!exemplar) {
     throw new ApiError(404, `Exemplar "${exemplarId}" not found.`);
   }
@@ -679,7 +661,8 @@ export async function getAssets(): Promise<Asset[]> {
   }
 
   await simulateLatency(60);
-  return storeAssets;
+  const { demoStore } = await loadDemoStore();
+  return demoStore.assets;
 }
 
 export async function updateAssetCriticality(
@@ -695,7 +678,8 @@ export async function updateAssetCriticality(
   }
 
   await simulateLatency(70);
-  const asset = storeAssets.find((a) => a.agent_id === agentId);
+  const { demoStore } = await loadDemoStore();
+  const asset = demoStore.assets.find((a) => a.agent_id === agentId);
   if (!asset) {
     throw new ApiError(404, `Asset with agent ID "${agentId}" not found.`);
   }
@@ -719,6 +703,7 @@ export async function registerAsset(
   }
 
   await simulateLatency(70);
+  const { demoStore } = await loadDemoStore();
   const created: Asset = {
     ...newAssetData,
     id: `asset-${Date.now()}`,
@@ -726,7 +711,7 @@ export async function registerAsset(
     updated_at: new Date().toISOString(),
   };
 
-  storeAssets.unshift(created);
+  demoStore.assets.unshift(created);
   return created;
 }
 
@@ -740,23 +725,26 @@ export async function getBenchmarkSuite(): Promise<BenchmarkPayload[]> {
   }
 
   await simulateLatency(60);
-  return BENCHMARK_30_PAYLOADS;
+  const { demoStore } = await loadDemoStore();
+  return demoStore.benchmarkCases;
 }
 
-export async function getBenchmarkReport(): Promise<EvaluationReport | null> {
-  if (isLiveBackendConfigured()) {
-    return apiClient<EvaluationReport | null>(`/api/v1/evaluation/report`);
-  }
+function buildDemoBenchmarkReport(benchmarkCases: BenchmarkPayload[]): EvaluationReport {
+  const total = benchmarkCases.length;
+  const baselineCount = benchmarkCases.filter((payload) => payload.baseline_bypassed).length;
+  const guardedCount = benchmarkCases.filter((payload) => payload.sentrax_bypassed).length;
+  const baselineRate = Number(((baselineCount / total) * 100).toFixed(1));
+  const guardedRate = Number(((guardedCount / total) * 100).toFixed(1));
+  const targetMet = guardedCount === 0;
 
-  await simulateLatency(60);
   return {
     timestamp: new Date().toISOString(),
     dataset_name: '30-Payload Adversarial Prompt-Injection Benchmark Suite',
-    total_payloads: 30,
-    baseline_bypass_rate: 53.3,
-    sentrax_bypass_rate: 0.0,
-    nfr3_target_achieved: true,
-    result: 'passed',
+    total_payloads: total,
+    baseline_bypass_rate: baselineRate,
+    sentrax_bypass_rate: guardedRate,
+    nfr3_target_achieved: targetMet,
+    result: targetMet ? 'passed' : 'failed',
     is_dry_run: true,
     notice: 'Offline demonstration using simulated fixture results.',
     comparative_metrics: [
@@ -783,14 +771,24 @@ export async function getBenchmarkReport(): Promise<EvaluationReport | null> {
       },
       {
         metric_name: 'Prompt-Injection Bypass Rate (Target: 0%)',
-        baseline_value: '53.3% (16 of 30 malicious payloads bypassed raw LLM)',
-        sentrax_value: '0.0% (0 of 30 bypassed — 100% Neutralized)',
-        research_delta: '0.0% Target Achieved via Strict Enveloping & Sanitizer',
-        is_target_met: true,
+        baseline_value: `${baselineRate.toFixed(1)}% (${baselineCount} of ${total} bypassed)`,
+        sentrax_value: `${guardedRate.toFixed(1)}% (${guardedCount} of ${total} bypassed)`,
+        research_delta: targetMet ? 'Zero-bypass target met' : 'Zero-bypass target missed',
+        is_target_met: targetMet,
       },
     ],
-    adversarial_suite: BENCHMARK_30_PAYLOADS,
+    adversarial_suite: benchmarkCases,
   };
+}
+
+export async function getBenchmarkReport(): Promise<EvaluationReport | null> {
+  if (isLiveBackendConfigured()) {
+    return apiClient<EvaluationReport | null>(`/api/v1/evaluation/report`);
+  }
+
+  await simulateLatency(60);
+  const { demoStore } = await loadDemoStore();
+  return buildDemoBenchmarkReport(demoStore.benchmarkCases);
 }
 
 export async function runBenchmarkEvaluation(
@@ -804,49 +802,9 @@ export async function runBenchmarkEvaluation(
   }
 
   await simulateLatency(300);
+  const { demoStore } = await loadDemoStore();
 
-  return {
-    timestamp: new Date().toISOString(),
-    dataset_name: '30-Payload Adversarial Prompt-Injection Benchmark Suite',
-    total_payloads: 30,
-    baseline_bypass_rate: 53.3,
-    sentrax_bypass_rate: 0.0,
-    nfr3_target_achieved: true,
-    result: 'passed',
-    is_dry_run: true,
-    notice: 'Offline demonstration using simulated fixture results.',
-    comparative_metrics: [
-      {
-        metric_name: 'Classification Precision / Recall / F1',
-        baseline_value: 'Precision: 81.2% | Recall: 78.4% (F1: 0.798)',
-        sentrax_value: 'Precision: 94.6% | Recall: 96.2% (F1: 0.954)',
-        research_delta: '+15.6% F1 Improvement (Explicit Evidence Grounding & Exemplars)',
-        is_target_met: true,
-      },
-      {
-        metric_name: 'Abstention Accuracy (Low-Conf & Conflict)',
-        baseline_value: '0.0% (Forced binary hallucination on incomplete telemetry)',
-        sentrax_value: '98.2% (Routed to NEEDS_ANALYST_REVIEW)',
-        research_delta: 'Abstention Policy Active',
-        is_target_met: true,
-      },
-      {
-        metric_name: 'Safety Floor Enforcement (Rule Level >= 10)',
-        baseline_value: '0.0% (14 critical detection alerts silently downgraded to FP)',
-        sentrax_value: '100.0% (Zero silent downgrades; CRITICAL/HIGH enforced)',
-        research_delta: 'Multi-Tier Safety Floor Active',
-        is_target_met: true,
-      },
-      {
-        metric_name: 'Prompt-Injection Bypass Rate (Target: 0%)',
-        baseline_value: '53.3% (16 of 30 malicious payloads bypassed raw LLM)',
-        sentrax_value: '0.0% (0 of 30 bypassed — 100% Neutralized)',
-        research_delta: '0.0% Target Achieved via Strict Enveloping & Sanitizer',
-        is_target_met: true,
-      },
-    ],
-    adversarial_suite: BENCHMARK_30_PAYLOADS,
-  };
+  return buildDemoBenchmarkReport(demoStore.benchmarkCases);
 }
 
 // ---------------------------------------------------------------------------
@@ -859,7 +817,8 @@ export async function getUsers(): Promise<User[]> {
   }
 
   await simulateLatency(50);
-  return storeUsers;
+  const { demoStore } = await loadDemoStore();
+  return demoStore.users;
 }
 
 export async function updateUserRole(userId: string, role: UserRole): Promise<User> {
@@ -871,7 +830,8 @@ export async function updateUserRole(userId: string, role: UserRole): Promise<Us
   }
 
   await simulateLatency(60);
-  const user = storeUsers.find((u) => u.id === userId);
+  const { demoStore } = await loadDemoStore();
+  const user = demoStore.users.find((u) => u.id === userId);
   if (!user) {
     throw new ApiError(404, `User with ID "${userId}" not found.`);
   }
@@ -889,7 +849,8 @@ export async function toggleUserActive(userId: string, isActive: boolean): Promi
   }
 
   await simulateLatency(60);
-  const user = storeUsers.find((u) => u.id === userId);
+  const { demoStore } = await loadDemoStore();
+  const user = demoStore.users.find((u) => u.id === userId);
   if (!user) {
     throw new ApiError(404, `User with ID "${userId}" not found.`);
   }
@@ -900,22 +861,23 @@ export async function toggleUserActive(userId: string, isActive: boolean): Promi
 
 export async function createUser(
   newUserData: Omit<User, 'id' | 'created_at'>
-): Promise<User> {
+): Promise<User & { temporary_password?: string }> {
   if (isLiveBackendConfigured()) {
-    return apiClient<User>(`/api/v1/admin/users`, {
+    return apiClient<User & { temporary_password?: string }>(`/api/v1/admin/users`, {
       method: 'POST',
       body: JSON.stringify(newUserData),
     });
   }
 
   await simulateLatency(70);
+  const { demoStore } = await loadDemoStore();
   const created: User = {
     ...newUserData,
-    id: `usr-00${storeUsers.length + 1}`,
+    id: `usr-00${demoStore.users.length + 1}`,
     created_at: new Date().toISOString(),
   };
 
-  storeUsers.push(created);
+  demoStore.users.push(created);
   return created;
 }
 
@@ -923,33 +885,28 @@ export async function createUser(
 // System & SIEM Configuration Services
 // ---------------------------------------------------------------------------
 
-export async function getSystemConfig(): Promise<SystemConfig> {
-  if (isLiveBackendConfigured()) {
-    return apiClient<SystemConfig>(`/api/v1/admin/config`);
-  }
-
-  await simulateLatency(40);
-  return storeSystemConfig;
+export function getRuntimeSettings(): Promise<RuntimeSettings> {
+  return apiClient<RuntimeSettings>('/api/v1/runtime/settings', { cache: 'no-store' });
 }
 
-export async function updateSystemConfig(
+export async function getDemoSystemConfig(): Promise<SystemConfig> {
+  await simulateLatency(40);
+  const { demoStore } = await loadDemoStore();
+  return demoStore.systemConfig;
+}
+
+export async function updateDemoSystemConfig(
   configUpdate: Partial<SystemConfig>
 ): Promise<SystemConfig> {
-  if (isLiveBackendConfigured()) {
-    return apiClient<SystemConfig>(`/api/v1/admin/config`, {
-      method: 'PATCH',
-      body: JSON.stringify(configUpdate),
-    });
-  }
-
   await simulateLatency(70);
-  storeSystemConfig = {
-    ...storeSystemConfig,
+  const { demoStore } = await loadDemoStore();
+  demoStore.systemConfig = {
+    ...demoStore.systemConfig,
     ...configUpdate,
     last_sync_timestamp: new Date().toISOString(),
   };
 
-  return storeSystemConfig;
+  return demoStore.systemConfig;
 }
 
 // ---------------------------------------------------------------------------

@@ -34,6 +34,7 @@ export const EvidenceTreePane: React.FC<EvidenceTreePaneProps> = ({
   const [collapsedNodes, setCollapsedNodes] = useState<Record<string, boolean>>({});
 
   const containerRef = useRef<HTMLDivElement>(null);
+  const focusedCitation = useRef<EvidenceTreePaneProps['citation']>(null);
 
   useEffect(() => {
     if (!citation) return;
@@ -48,9 +49,12 @@ export const EvidenceTreePane: React.FC<EvidenceTreePaneProps> = ({
   }, [citation]);
 
   useEffect(() => {
-    if (!citation || activeTab !== 'tree') return;
+    if (!citation || activeTab !== 'tree' || focusedCitation.current === citation) return;
     const target = containerRef.current?.querySelector<HTMLElement>(`[data-dot-key="${CSS.escape(citation.key)}"]`);
-    target?.scrollIntoView({ block: 'center' });
+    if (!target || !target.getClientRects().length) return;
+    focusedCitation.current = citation;
+    target.scrollIntoView({ block: 'center' });
+    target.focus({ preventScroll: true });
   }, [citation, activeTab, collapsedNodes]);
 
   const toggleCollapse = (path: string) => {
@@ -173,19 +177,20 @@ export const EvidenceTreePane: React.FC<EvidenceTreePaneProps> = ({
       <div
         key={currentPath}
         data-dot-key={currentPath}
+        tabIndex={-1}
         data-selected-citation={isSelected || undefined}
         className={`flex flex-col sm:flex-row sm:items-baseline justify-between gap-2 py-1.5 px-2.5 rounded-lg text-xs font-mono transition-all ${
           isSelected
-            ? 'bg-cyan-950/60 border border-cyan-500 shadow-[0_0_12px_rgba(6,182,212,0.25)] ring-1 ring-cyan-400'
+            ? 'bg-cyan-950/60 border border-cyan-500'
             : isCited
-            ? 'bg-zinc-900/90 border border-cyan-900/60 border-l-2 border-l-cyan-400'
+            ? 'bg-zinc-900/90 border border-cyan-900/60'
             : 'hover:bg-zinc-900/40 border border-transparent'
         }`}
-        style={{ marginLeft: `${depth * 14}px` }}
+        style={{ marginLeft: `${Math.min(depth, 8) * 8}px` }}
       >
-        <div className="flex items-center gap-2 min-w-0">
-          <span className="text-zinc-400 font-medium shrink-0">{key}:</span>
-          <span className="text-zinc-100 break-all select-all font-mono">
+        <div className="min-w-0 [overflow-wrap:anywhere]">
+          <span className="text-muted-foreground font-medium">{key}: </span>
+          <span className="text-zinc-100 select-all">
             {isArrayOfPrimitives
               ? JSON.stringify(value)
               : typeof value === 'boolean'
@@ -198,16 +203,13 @@ export const EvidenceTreePane: React.FC<EvidenceTreePaneProps> = ({
           </span>
         </div>
 
-        <div className="flex items-center gap-2 shrink-0 self-end sm:self-auto">
+        <div className="flex items-center gap-2 shrink-0 self-start sm:self-auto">
           {isCited && (
             <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold font-mono tracking-wider bg-cyan-950 text-cyan-300 border border-cyan-700/80">
               <Sparkles className="size-2.5 text-cyan-400" />
               <span>CITED BY AI</span>
             </span>
           )}
-          <span className="text-[10px] text-zinc-600 font-mono hidden md:inline">
-            {currentPath}
-          </span>
         </div>
       </div>
     );
@@ -221,12 +223,13 @@ export const EvidenceTreePane: React.FC<EvidenceTreePaneProps> = ({
   };
 
   return (
-    <div className="h-full flex flex-col min-h-0 bg-zinc-950 border-l border-zinc-800/80 text-zinc-100 text-xs overflow-hidden">
+    <div className="flex min-h-0 min-w-0 flex-col bg-card text-foreground text-xs lg:h-full lg:overflow-hidden">
       {/* 3 Sub-Tabs Header */}
-      <div className="min-h-12 border-b border-zinc-800/80 bg-zinc-900/50 px-3 py-1 flex items-center justify-between gap-2 shrink-0 overflow-x-auto">
-        <div className="flex items-center gap-1.5 p-1 bg-zinc-950 rounded-lg border border-zinc-800/80">
+      <div className="min-h-12 border-b border-border px-2 py-1 flex flex-wrap items-center justify-between gap-2 shrink-0" role="group" aria-label="Evidence and diagnostics">
+        <div className="flex flex-wrap items-center gap-1">
           <button
             type="button"
+            aria-pressed={activeTab === 'tree'}
             onClick={() => setActiveTab('tree')}
             className={`flex items-center gap-1.5 px-3 py-1 rounded-md text-xs font-mono font-medium transition-colors ${
               activeTab === 'tree'
@@ -240,6 +243,7 @@ export const EvidenceTreePane: React.FC<EvidenceTreePaneProps> = ({
 
           <button
             type="button"
+            aria-pressed={activeTab === 'raw_json'}
             onClick={() => setActiveTab('raw_json')}
             className={`flex items-center gap-1.5 px-3 py-1 rounded-md text-xs font-mono font-medium transition-colors ${
               activeTab === 'raw_json'
@@ -248,11 +252,12 @@ export const EvidenceTreePane: React.FC<EvidenceTreePaneProps> = ({
             }`}
           >
             <Code2 className="size-3.5 text-zinc-400" />
-            <span>Raw Log JSON</span>
+            <span>JSON</span>
           </button>
 
           <button
             type="button"
+            aria-pressed={activeTab === 'prompt_envelope'}
             onClick={() => setActiveTab('prompt_envelope')}
             className={`flex items-center gap-1.5 px-3 py-1 rounded-md text-xs font-mono font-medium transition-colors ${
               activeTab === 'prompt_envelope'
@@ -261,7 +266,7 @@ export const EvidenceTreePane: React.FC<EvidenceTreePaneProps> = ({
             }`}
           >
             <ShieldCheck className="size-3.5 text-cyan-400" />
-            <span>Prompt Envelope</span>
+            <span>Prompt reconstruction</span>
           </button>
         </div>
 
@@ -310,10 +315,10 @@ export const EvidenceTreePane: React.FC<EvidenceTreePaneProps> = ({
       </div>
 
       {/* Pane Content Body */}
-      <div ref={containerRef} className="flex-1 min-h-0 overflow-y-auto p-4 custom-scrollbar">
+      <div ref={containerRef} className="flex-1 min-h-0 p-3 sm:p-4 lg:overflow-y-auto">
         {activeTab === 'tree' && (
           <div className="space-y-4">
-            <div className="flex items-center justify-between text-[11px] text-zinc-400 font-mono pb-2 border-b border-zinc-900">
+            <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground pb-2 border-b border-border">
               <span>Telemetry Evidence</span>
               <span className="text-cyan-400">
                 {citedEvidenceKeys.length} cited fields highlighted
@@ -335,7 +340,7 @@ export const EvidenceTreePane: React.FC<EvidenceTreePaneProps> = ({
             </div>
             <pre
               tabIndex={0}
-              className="flex-1 min-h-[350px] max-h-[calc(92vh-220px)] p-4 rounded-xl bg-black border border-zinc-800 text-zinc-300 font-mono text-xs overflow-x-auto overflow-y-auto custom-scrollbar leading-relaxed select-text focus:outline-none focus:ring-1 focus:ring-zinc-700"
+              className="min-w-0 p-3 rounded-lg bg-background border border-border text-zinc-300 font-mono text-xs whitespace-pre-wrap [overflow-wrap:anywhere] leading-relaxed select-text"
             >
               {JSON.stringify(evidencePack, null, 2)}
             </pre>
@@ -345,7 +350,7 @@ export const EvidenceTreePane: React.FC<EvidenceTreePaneProps> = ({
         {activeTab === 'prompt_envelope' && (
           <div className="space-y-3 flex flex-col h-full min-h-0">
             <div className="p-3.5 rounded-xl bg-cyan-950/20 border border-cyan-800/40 text-cyan-200 text-xs font-sans space-y-1 shrink-0">
-              <div className="font-semibold text-cyan-300 flex items-center justify-between font-mono text-xs">
+              <div className="font-semibold text-cyan-300 flex flex-wrap items-center justify-between gap-2 text-xs">
                 <div className="flex items-center gap-1.5">
                   <ShieldCheck className="size-4" />
                   <span>Isolated Prompt Envelope</span>
@@ -361,7 +366,7 @@ export const EvidenceTreePane: React.FC<EvidenceTreePaneProps> = ({
 
             <pre
               tabIndex={0}
-              className="flex-1 min-h-[300px] max-h-[calc(92vh-280px)] p-4 rounded-xl bg-black border border-zinc-800 text-cyan-100 font-mono text-xs overflow-x-auto overflow-y-auto custom-scrollbar leading-relaxed select-text focus:outline-none focus:ring-1 focus:ring-cyan-900"
+              className="min-w-0 p-3 rounded-lg bg-background border border-border text-cyan-100 font-mono text-xs whitespace-pre-wrap [overflow-wrap:anywhere] leading-relaxed select-text"
             >
               {JSON.stringify(
                 {

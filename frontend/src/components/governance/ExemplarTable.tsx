@@ -66,10 +66,11 @@ export const ExemplarTable: React.FC<ExemplarTableProps> = ({
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-3.5 text-zinc-500" />
           <input
             type="text"
+            aria-label="Search feedback examples"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder="Search by rule, process, rationale, or author..."
-            className="w-full pl-9 pr-3 py-1.5 bg-zinc-900 border border-zinc-800 rounded-lg text-xs font-mono text-zinc-100 placeholder:text-zinc-600 focus:outline-none focus:border-zinc-700 transition-colors"
+            className="field pl-9"
           />
         </div>
 
@@ -113,7 +114,7 @@ export const ExemplarTable: React.FC<ExemplarTableProps> = ({
 
       {/* Exemplar Governance Table */}
       <div className="rounded-xl border border-zinc-850 bg-zinc-950 overflow-hidden shadow-sm">
-        <div className="overflow-x-auto custom-scrollbar">
+        <div className="table-region" tabIndex={0} role="region" aria-label="Feedback examples table">
           <table className="w-full text-left border-collapse text-xs">
             <thead>
               <tr className="border-b border-zinc-850 bg-zinc-900/60 font-mono text-[10px] text-zinc-400 uppercase tracking-wider">
@@ -155,7 +156,7 @@ export const ExemplarTable: React.FC<ExemplarTableProps> = ({
                     <tr
                       key={ex.id}
                       className={`hover:bg-zinc-900/40 transition-colors ${
-                        !ex.is_active ? 'opacity-60 bg-zinc-950/40' : ''
+                        !ex.is_active ? 'bg-zinc-950/40' : ''
                       }`}
                     >
                       {/* ID & Status */}
@@ -163,12 +164,12 @@ export const ExemplarTable: React.FC<ExemplarTableProps> = ({
                         <div className="font-bold text-zinc-200">{ex.id}</div>
                         <div className="pt-1">
                           {ex.is_active ? (
-                            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-mono font-medium bg-emerald-950/80 text-emerald-300 border border-emerald-800/60">
+                            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium bg-emerald-950/80 text-emerald-300 border border-emerald-800/60">
                               <span className="size-1 rounded-full bg-emerald-400" />
                               <span>ACTIVE</span>
                             </span>
                           ) : (
-                            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-mono font-medium bg-zinc-900 text-zinc-400 border border-zinc-800">
+                            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium bg-zinc-900 text-zinc-400 border border-zinc-800">
                               <Ban className="size-2.5 text-zinc-500" />
                               <span>REVOKED</span>
                             </span>
@@ -201,9 +202,10 @@ export const ExemplarTable: React.FC<ExemplarTableProps> = ({
 
                       {/* Analyst Justification */}
                       <td className="py-3.5 px-4 max-w-sm">
-                        <div className="text-xs text-zinc-300 font-sans italic line-clamp-2" title={ex.rationale}>
-                          "{ex.rationale}"
-                        </div>
+                        <details className="w-48 text-sm text-zinc-200">
+                          <summary className="cursor-pointer py-1 text-zinc-200">Read rationale</summary>
+                          <p className="mt-1 wrap-anywhere">{ex.rationale}</p>
+                        </details>
                         <div className="text-[10px] text-zinc-500 font-mono pt-1">
                           Author: {ex.created_by} • {new Date(ex.created_at).toLocaleDateString()}
                         </div>
@@ -219,10 +221,10 @@ export const ExemplarTable: React.FC<ExemplarTableProps> = ({
                           }`}
                         >
                           <Sparkles className="size-2.5" />
-                          <span>{ex.match_tier_support === 'Tier 1' ? 'Signature eligible' : 'Tier fallback only'}</span>
+                          <span>{ex.match_tier_support === 'Tier 1' ? 'Rule and process match' : 'Rule and asset tier fallback'}</span>
                         </span>
                         <div className="text-[10px] text-zinc-400 pt-1">
-                          {ex.match_hit_count} historical hits
+                          Used {ex.match_hit_count} {ex.match_hit_count === 1 ? 'time' : 'times'}
                         </div>
                       </td>
 

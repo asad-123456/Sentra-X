@@ -10,7 +10,7 @@ See [backend setup](../backend/README.md) for commands, [database documentation]
 4. Successful assessments reach `AWAITING_ANALYST`. Failed triage reaches `NEEDS_MANUAL_TRIAGE`. Human decisions update the alert and append an audit row. Eligible decisions can create exemplars. `RETRY_AI` commits the pending state before re-enqueueing.
 5. Most routes and the worker use synchronous SQLAlchemy sessions with Psycopg 3. The webhook delegates synchronous ingestion to a thread pool. An async session factory also exists.
 
-The API uses bearer JWTs and database-backed checks on routes using the shared authorization dependency. Use `DEMO_MODE` only in an isolated lab. Settings written via `/admin/config` are stored separately from the environment-based worker and poller configuration. Saving an admin setting does not reconfigure the running worker or poller.
+The API uses bearer JWTs and database-backed checks on routes using the shared authorization dependency. Use `DEMO_MODE` only in an isolated lab. The live UI reads process settings from `/runtime/settings`. Change the backend environment and restart the process to apply runtime configuration.
 
 ## Endpoints
 
@@ -31,9 +31,9 @@ The application prefix is `/api/v1`. The paths in the first table already includ
 | `GET /governance/exemplars`, `PATCH /governance/exemplars/{exemplar_id}` | TeamLead/Admin list. TeamLead can change exemplar activation. |
 | `GET /governance/assets`, `PATCH /governance/assets/{agent_id}`, `POST /governance/assets` | Analyst/TeamLead/Admin can list assets. TeamLead/Admin can change tier and description. Admin can register assets with an optional IP address. |
 | `GET /evaluation/suite`, `GET /evaluation/report`, `POST /evaluation/run`, `GET /evaluation/export-md`, `GET /evaluation/export-csv` | Admin benchmark inputs, latest report, explicit run, and exports. |
-
+| `GET /runtime/settings` | Authenticated Analyst, TeamLead, and Admin can read effective non-secret ingestion settings, active worker count, provider, model, and guardrails. Poll interval appears only in poll mode. Worker status describes local threads. |
 | `GET /admin/users`, `POST /admin/users`, `PATCH /admin/users/{user_id}/role`, `PATCH /admin/users/{user_id}/status` | Admin account management. |
-| `GET /admin/config`, `PATCH /admin/config` | Read or edit persisted admin settings. |
+| `GET /admin/config` | Deprecated, read-only view of historical admin settings. PATCH returns HTTP 405. |
 
 ### Queue and decisions
 

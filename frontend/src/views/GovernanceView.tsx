@@ -154,7 +154,7 @@ export const GovernanceView: React.FC = () => {
       {/* View Header */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div className="space-y-1">
-          <h1 className="text-xl font-bold tracking-tight text-zinc-50 font-mono">
+          <h1 className="page-title">
             Governance &amp; Host Registry
           </h1>
           <p className="text-xs text-zinc-400 font-sans">
@@ -174,10 +174,11 @@ export const GovernanceView: React.FC = () => {
       </div>
 
       {/* Primary Tab Navigation */}
-      <div className="border-b border-zinc-850 flex items-center gap-2">
+      <div className="border-b border-border flex flex-wrap items-center gap-2">
         <button
           type="button"
           onClick={() => setActiveTab('exemplars')}
+          aria-pressed={activeTab === 'exemplars'}
           className={`flex items-center gap-2 px-4 py-2.5 border-b-2 font-mono text-xs font-semibold transition-colors cursor-pointer ${
             activeTab === 'exemplars'
               ? 'border-cyan-400 text-zinc-100 bg-zinc-900/40'
@@ -185,7 +186,7 @@ export const GovernanceView: React.FC = () => {
           }`}
         >
           <Sparkles className="size-3.5 text-cyan-400" />
-          <span>Few-Shot Exemplars</span>
+          <span>Feedback examples</span>
           <span className="text-[10px] px-2 py-0.5 rounded-full bg-zinc-900 border border-zinc-800 text-zinc-300">
             {activeExemplarCount} active / {exemplars.length} total
           </span>
@@ -194,6 +195,7 @@ export const GovernanceView: React.FC = () => {
         <button
           type="button"
           onClick={() => setActiveTab('assets')}
+          aria-pressed={activeTab === 'assets'}
           className={`flex items-center gap-2 px-4 py-2.5 border-b-2 font-mono text-xs font-semibold transition-colors cursor-pointer ${
             activeTab === 'assets'
               ? 'border-cyan-400 text-zinc-100 bg-zinc-900/40'

@@ -1,11 +1,13 @@
 import React, { useEffect, useMemo, useState, useTransition } from 'react';
 import { useOutletContext } from 'react-router-dom';
+import type { AppShellContext } from '../components/layout/AppShell';
 import type { AlertListItem, PaginatedResult, QueueFilters, QueueTab, GuardrailFilter, QueueCounts } from '../types/sentrax';
 import { getAlerts, getQueueCounts, quickApprove } from '../api/services';
 import { useAuth } from '../context/AuthContext';
 import { QueueFilterBar } from '../components/queue/QueueFilterBar';
 import { TriageQueueTable } from '../components/queue/TriageQueueTable';
 import { AlertDetailModal } from '../components/modal/AlertDetailModal';
+import { Button } from '../components/ui/button';
 import {
   AlertCircle,
   Inbox,
@@ -16,11 +18,12 @@ import {
   X,
   ChevronLeft,
   ChevronRight,
+  RotateCcw,
 } from 'lucide-react';
 
 export const TriageQueueView: React.FC = () => {
   const { user } = useAuth();
-  const setActionableCount = useOutletContext<(count: number) => void>();
+  const { setActionableCount } = useOutletContext<AppShellContext>();
   const [, startTransition] = useTransition();
 
   // Filter States
@@ -39,9 +42,11 @@ export const TriageQueueView: React.FC = () => {
   const [refreshVersion, setRefreshVersion] = useState(0);
   const [queueResult, setQueueResult] = useState<{
     key: string;
+    filterKey: string;
     data?: PaginatedResult<AlertListItem>;
     error?: string;
   } | null>(null);
+  const [lastUpdated, setLastUpdated] = useState<string | null>(null);
   const [counts, setCounts] = useState<QueueCounts>({
     awaiting: 0,
     escalated: 0,
@@ -56,7 +61,7 @@ export const TriageQueueView: React.FC = () => {
   const [notice, setNotice] = useState<{ message: string; failed?: boolean } | null>(null);
 
   // Selected Alert for inspection modal
-  const [selectedAlertId, setSelectedAlertId] = useState<string | null>(null);
+  const [selectedAlert, setSelectedAlert] = useState<{ id: string; opener: HTMLButtonElement } | null>(null);
 
   // Check if any non-default filter is currently active
   const hasActiveFilters =
@@ -78,11 +83,13 @@ export const TriageQueueView: React.FC = () => {
     page,
     pageSize,
   }), [currentTab, subStatus, severity, guardrail, assetTier, search, ruleId, page, pageSize]);
-  const requestKey = JSON.stringify([filters, refreshVersion]);
+  const filterKey = JSON.stringify(filters);
+  const requestKey = JSON.stringify([filterKey, refreshVersion]);
   const activeResult = queueResult?.key === requestKey ? queueResult : null;
-  const alerts = activeResult?.data?.items ?? [];
-  const total = activeResult?.data?.total ?? 0;
-  const totalPages = activeResult?.data?.totalPages ?? 1;
+  const displayed = queueResult?.filterKey === filterKey ? queueResult.data : undefined;
+  const alerts = displayed?.items ?? [];
+  const total = displayed?.total ?? 0;
+  const totalPages = displayed?.totalPages ?? 1;
   const isLoading = activeResult === null;
 
   useEffect(() => {
@@ -107,15 +114,21 @@ export const TriageQueueView: React.FC = () => {
       if (filters.page > data.totalPages) {
         setPage(data.totalPages);
       } else {
-        setQueueResult({ key: requestKey, data });
+        setQueueResult({ key: requestKey, filterKey, data });
+        setLastUpdated(new Date().toISOString());
       }
     }).catch((error: unknown) => {
       if (!signal.aborted) {
-        setQueueResult({ key: requestKey, error: error instanceof Error ? error.message : 'Could not load alerts.' });
+        setQueueResult((previous) => ({
+          key: requestKey,
+          filterKey,
+          data: previous?.filterKey === filterKey ? previous.data : undefined,
+          error: error instanceof Error ? error.message : 'Could not load alerts.',
+        }));
       }
     });
     return () => controller.abort();
-  }, [filters, requestKey]);
+  }, [filters, filterKey, requestKey]);
 
   useEffect(() => {
     if (!notice || notice.failed) return;
@@ -197,71 +210,26 @@ export const TriageQueueView: React.FC = () => {
   const endItem = Math.min(page * pageSize, total);
 
   return (
-    <div className="space-y-6">
+    <div className="flex flex-col gap-4 sm:gap-6">
       {/* Top Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+      <div className="flex flex-col sm:-order-2 sm:flex-row sm:items-center justify-between gap-3">
         <div>
-          <h1 className="text-xl font-bold tracking-tight text-zinc-50 font-mono">
+          <h1 className="page-title" id="triage-queue-title" tabIndex={-1}>
             Alert Triage Queue
           </h1>
-          <p className="text-xs text-zinc-400">
+          <p className="text-sm text-muted-foreground">
             Review and triage incoming security alerts.
           </p>
         </div>
 
-        {/* Live Status Pill */}
-        <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-zinc-950 border border-zinc-800 text-xs font-mono text-zinc-400 self-start sm:self-auto">
-          <span className="size-2 rounded-full bg-emerald-500 animate-pulse" />
-          <span>Stream Active</span>
-          <span className="text-zinc-700">•</span>
-          <span className="text-zinc-300 font-semibold">{total} matching</span>
-        </div>
-      </div>
-
-      {/* Metric KPI Ribbon */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        {/* Total Pending */}
-        <div className="p-4 rounded-xl bg-zinc-950 border border-zinc-800 space-y-1 shadow-sm">
-          <div className="flex items-center justify-between text-zinc-400 text-xs font-mono">
-            <span>TOTAL PENDING</span>
-            <Inbox className="size-4 text-zinc-500" />
-          </div>
-          <div className="text-2xl font-bold font-mono text-zinc-100">{counts.awaiting}</div>
-          <div className="text-[11px] text-zinc-500 font-mono">
-            {counts.needsManualTriageCount} require manual triage
-          </div>
-        </div>
-
-        {/* Critical Safety Floor */}
-        <div className="p-4 rounded-xl bg-zinc-950 border border-red-500/30 space-y-1 shadow-[0_0_14px_rgba(239,68,68,0.06)]">
-          <div className="flex items-center justify-between text-red-400 text-xs font-mono font-medium">
-            <span>CRITICAL SAFETY FLOOR</span>
-            <ShieldAlert className="size-4 text-red-400" />
-          </div>
-          <div className="text-2xl font-bold font-mono text-red-300">{counts.criticalSafetyFloor}</div>
-          <div className="text-[11px] text-red-400/80 font-mono">Level &gt;= 12 mandatory human review</div>
-        </div>
-
-        {/* Abstention Warnings */}
-        <div className="p-4 rounded-xl bg-zinc-950 border border-amber-500/30 space-y-1 shadow-[0_0_14px_rgba(245,158,11,0.05)]">
-          <div className="flex items-center justify-between text-amber-400 text-xs font-mono">
-            <span>ABSTENTION WARNINGS</span>
-            <Clock className="size-4 text-amber-500" />
-          </div>
-          <div className="text-2xl font-bold font-mono text-zinc-100">{counts.abstentionWarnings}</div>
-          <div className="text-[11px] text-zinc-500 font-mono">Confidence &lt; 60% threshold</div>
-        </div>
-
-        {/* Mean Triage Latency */}
-        <div className="p-4 rounded-xl bg-zinc-950 border border-zinc-800 space-y-1 shadow-sm">
-          <div className="flex items-center justify-between text-zinc-400 text-xs font-mono">
-            <span>MEAN INFERENCE LATENCY</span>
-            <Zap className="size-4 text-emerald-400" />
-          </div>
-          <div className="text-2xl font-bold font-mono text-emerald-300">
-            {counts.meanLatencySeconds == null ? '—' : `${counts.meanLatencySeconds.toFixed(2)}s`}
-          </div>
-          <div className="text-[11px] text-zinc-500 font-mono">Recorded model call latency</div>
+        <div className="flex flex-wrap items-center gap-3">
+          <p role="status" className="text-xs text-muted-foreground">
+            {isLoading ? (displayed ? 'Refreshing queue…' : 'Loading alerts…') : activeResult?.error ? 'Refresh failed' : `${total} matching`}
+            {lastUpdated && <> · Last updated <time dateTime={lastUpdated}>{new Date(lastUpdated).toLocaleTimeString()}</time></>}
+          </p>
+          <Button variant="outline" onClick={refreshQueue} disabled={isLoading}>
+            <RotateCcw className="size-4" aria-hidden="true" /> Refresh queue
+          </Button>
         </div>
       </div>
 
@@ -282,11 +250,12 @@ export const TriageQueueView: React.FC = () => {
         </div>
       )}
 
-      {selectedAlertId && (
+      {selectedAlert && (
         <AlertDetailModal
-          key={selectedAlertId}
-          alertId={selectedAlertId}
-          onClose={() => setSelectedAlertId(null)}
+          key={selectedAlert.id}
+          alertId={selectedAlert.id}
+          opener={selectedAlert.opener}
+          onClose={() => setSelectedAlert(null)}
           onDecisionCommitted={handleDecisionCommitted}
         />
       )}
@@ -315,18 +284,19 @@ export const TriageQueueView: React.FC = () => {
         hasActiveFilters={hasActiveFilters}
       />
 
-      {activeResult?.error ? (
+      {activeResult?.error && (
         <div role="alert" className="flex items-center justify-between gap-3 rounded-lg border border-red-800 bg-red-950/50 p-3 text-sm text-red-200">
           <span>{activeResult.error}</span>
           <button type="button" onClick={refreshQueue} className="shrink-0 rounded border border-red-700 px-3 py-1">
             Retry queue
           </button>
         </div>
-      ) : (
+      )}
+      {(!activeResult?.error || displayed) && (
         <TriageQueueTable
           alerts={alerts}
           isLoading={isLoading}
-          onSelectAlert={setSelectedAlertId}
+          onSelectAlert={(id, opener) => setSelectedAlert({ id, opener })}
           onQuickApprove={handleQuickApprove}
           hasActiveFilters={hasActiveFilters}
           onResetFilters={handleResetFilters}
@@ -343,11 +313,12 @@ export const TriageQueueView: React.FC = () => {
         </div>
 
         {/* Right: Controls & Page size */}
-        <div className="flex items-center gap-4">
+        <div className="flex flex-wrap items-center gap-3">
           {/* Page Size Selector */}
           <div className="flex items-center gap-1.5">
             <span className="text-zinc-500 text-[11px]">SHOW:</span>
             <select
+              aria-label="Alerts per page"
               value={pageSize}
               onChange={(e) => {
                 setPageSize(Number(e.target.value));
@@ -388,6 +359,53 @@ export const TriageQueueView: React.FC = () => {
               <ChevronRight className="size-4" />
             </button>
           </div>
+        </div>
+      </div>
+
+      {/* Metric KPI Ribbon */}
+      <div className="grid grid-cols-2 sm:-order-1 gap-2 sm:gap-4 xl:grid-cols-4">
+        {/* Total Pending */}
+        <div className="surface min-w-0 p-3 sm:p-4 space-y-1">
+          <div className="flex items-center justify-between text-zinc-400 text-xs font-mono">
+            <span>Pending review</span>
+            <Inbox className="size-4 text-zinc-500" />
+          </div>
+          <div className="text-2xl font-bold font-mono text-zinc-100">{counts.awaiting}</div>
+          <div className="text-xs text-muted-foreground">
+            {counts.needsManualTriageCount} require manual triage
+          </div>
+        </div>
+
+        {/* Critical Safety Floor */}
+        <div className="surface min-w-0 p-3 sm:p-4 space-y-1">
+          <div className="flex items-center justify-between text-red-400 text-xs font-mono font-medium">
+            <span>Critical safety floor</span>
+            <ShieldAlert className="size-4 text-red-400" />
+          </div>
+          <div className="text-2xl font-bold font-mono text-red-300">{counts.criticalSafetyFloor}</div>
+          <div className="text-xs text-muted-foreground">High-risk downgrades blocked</div>
+        </div>
+
+        {/* Abstention Warnings */}
+        <div className="surface min-w-0 p-3 sm:p-4 space-y-1">
+          <div className="flex items-center justify-between text-amber-400 text-xs font-mono">
+            <span>Model deferred</span>
+            <Clock className="size-4 text-amber-500" />
+          </div>
+          <div className="text-2xl font-bold font-mono text-zinc-100">{counts.abstentionWarnings}</div>
+          <div className="text-xs text-muted-foreground">Analyst verdict required</div>
+        </div>
+
+        {/* Mean Triage Latency */}
+        <div className="surface min-w-0 p-3 sm:p-4 space-y-1">
+          <div className="flex items-center justify-between text-zinc-400 text-xs font-mono">
+            <span>Mean inference latency</span>
+            <Zap className="size-4 text-emerald-400" />
+          </div>
+          <div className="text-2xl font-bold font-mono text-emerald-300">
+            {counts.meanLatencySeconds == null ? '—' : `${counts.meanLatencySeconds.toFixed(2)}s`}
+          </div>
+          <div className="text-xs text-muted-foreground">Recorded model call latency</div>
         </div>
       </div>
     </div>
