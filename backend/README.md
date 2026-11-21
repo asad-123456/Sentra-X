@@ -79,6 +79,8 @@ Enter and confirm a password at the hidden prompts. The command creates the firs
 
 The Wazuh [source guide](../docs/wazuh_alert_source.md) covers configuration, the webhook contract and replay. The API lifespan starts the worker by default. The worker and Wazuh settings read `backend/.env` and the process environment. Use one API process for the in-process triage queue. `TRIAGE_ENABLED=false` disables consumption. On startup and periodically, the worker scans PostgreSQL for pending alerts, including work submitted by the standalone replay CLI.
 
+In live mode, open **Admin & Benchmark → System Configuration** to see the running worker, its provider and model, and the effective ingestion and guardrail settings. Change the backend environment to update runtime settings. Recreate the backend container in Compose, or restart a backend running directly on the host, then select **Refresh settings**.
+
 For a smoke test, start with an empty or newly populated disposable database and the mock provider. Ingest a fresh qualifying alert and verify `AWAITING_ANALYST`, an evidence pack, and an assessment. To test restart recovery, ingest another fresh alert with the worker disabled, then enable it and restart the API. The pending alert should reach the same state.
 
 ### Ollama triage

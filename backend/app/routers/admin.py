@@ -4,7 +4,6 @@ import json
 import logging
 import secrets
 import uuid
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -221,18 +220,12 @@ DEFAULT_SYSTEM_CONFIG: Dict[str, Any] = {
 
 
 def _load_system_config(db: Optional[Session] = None) -> Dict[str, Any]:
-    """Load configuration from PostgreSQL table, with resilient disk/default fallback."""
+    """Read historical admin settings, with disk/default fallback for older installs."""
     if db:
         try:
             config_row = db.query(SystemConfiguration).first()
             if config_row:
                 return config_row.to_dict()
-            # If table is empty, auto-seed default row
-            new_row = SystemConfiguration()
-            db.add(new_row)
-            db.commit()
-            db.refresh(new_row)
-            return new_row.to_dict()
         except Exception as exc:
             logger.warning("Database config query failed, falling back to disk cache: %s", exc)
 
@@ -248,40 +241,7 @@ def _load_system_config(db: Optional[Session] = None) -> Dict[str, Any]:
     return dict(DEFAULT_SYSTEM_CONFIG)
 
 
-def _save_system_config(payload: Dict[str, Any], db: Optional[Session] = None) -> Dict[str, Any]:
-    """Persist updated configuration to PostgreSQL and mirror to JSON state file."""
-    current = _load_system_config(db)
-    for k, v in payload.items():
-        if k in DEFAULT_SYSTEM_CONFIG:
-            current[k] = v
-
-    if db:
-        try:
-            config_row = db.query(SystemConfiguration).first()
-            if not config_row:
-                config_row = SystemConfiguration()
-                db.add(config_row)
-
-            for k, v in current.items():
-                if hasattr(config_row, k) and k != "id":
-                    setattr(config_row, k, v)
-            config_row.updated_at = datetime.now(timezone.utc)
-            db.commit()
-            db.refresh(config_row)
-            current = config_row.to_dict()
-        except Exception as exc:
-            logger.error("Failed to persist configuration to PostgreSQL: %s", exc)
-
-    try:
-        with open(CONFIG_FILE_PATH, "w", encoding="utf-8") as f:
-            json.dump(current, f, indent=2)
-    except Exception:
-        pass
-
-    return current
-
-
-@router.get("/config", response_model=Dict[str, Any])
+@router.get("/config", response_model=Dict[str, Any], deprecated=True)
 def get_system_config(
     _: None = Depends(verify_admin_access),
     db: Session = Depends(get_db),
@@ -289,24 +249,11 @@ def get_system_config(
     return _load_system_config(db)
 
 
-@router.patch("/config", response_model=Dict[str, Any])
-def update_system_config(
-    payload: Dict[str, Any],
-    _: None = Depends(verify_admin_access),
-    db: Session = Depends(get_db),
-):
-    if "min_rule_level" in payload:
-        try:
-            mrl = int(payload["min_rule_level"])
-            if not 0 <= mrl <= 9:
-                raise HTTPException(
-                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                    detail="HTTP 422: min_rule_level must be between 0 and 9 (rule levels 10+ represent critical alerts and cannot be suppressed).",
-                )
-        except ValueError:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail="HTTP 422: min_rule_level must be an integer.",
-            )
-    return _save_system_config(payload, db)
+@router.patch("/config", include_in_schema=False)
+def update_system_config(_: None = Depends(verify_admin_access)):
+    raise HTTPException(
+        status_code=status.HTTP_405_METHOD_NOT_ALLOWED,
+        detail="Runtime settings are read-only here. Change the backend environment and restart the backend.",
+        headers={"Allow": "GET"},
+    )
 

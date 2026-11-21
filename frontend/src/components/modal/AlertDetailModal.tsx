@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import type { AlertDetail, DecisionPayload } from '../../types/sentrax';
 import { getAlertDetail, submitDecision } from '../../api/services';
 import { useAuth } from '../../context/AuthContext';
@@ -6,6 +6,8 @@ import { AssessmentPane } from './AssessmentPane';
 import { EvidenceTreePane } from './EvidenceTreePane';
 import { DecisionActionPanel } from './DecisionActionPanel';
 import { AssetTierBadge } from '../badges/AssetTierBadge';
+import { Dialog, DialogContent, DialogTitle } from '../ui/dialog';
+import { Button } from '../ui/button';
 import {
   X,
   Clock,
@@ -17,12 +19,14 @@ import {
 
 interface AlertDetailModalProps {
   alertId: string;
+  opener: HTMLButtonElement;
   onClose: () => void;
   onDecisionCommitted: (message: string) => void;
 }
 
 export const AlertDetailModal: React.FC<AlertDetailModalProps> = ({
   alertId,
+  opener,
   onClose,
   onDecisionCommitted,
 }) => {
@@ -34,6 +38,8 @@ export const AlertDetailModal: React.FC<AlertDetailModalProps> = ({
   const [savedAuditId, setSavedAuditId] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [mobilePane, setMobilePane] = useState<'assessment' | 'evidence'>('assessment');
+  const title = useRef<HTMLHeadingElement>(null);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -49,16 +55,11 @@ export const AlertDetailModal: React.FC<AlertDetailModalProps> = ({
     return () => controller.abort();
   }, [alertId, refreshVersion, user?.role]);
 
-  // Handle Escape key to close modal
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        onClose();
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [onClose]);
+  const returnFocus = () => opener.isConnected ? opener : document.getElementById('triage-queue-title');
+  const close = () => {
+    onClose();
+    requestAnimationFrame(() => returnFocus()?.focus());
+  };
 
   const refreshDetail = () => {
     setDetail(null);
@@ -76,6 +77,7 @@ export const AlertDetailModal: React.FC<AlertDetailModalProps> = ({
     try {
       const audit = await submitDecision(payload, user);
       setSavedAuditId(audit.id);
+      setMobilePane('assessment');
       refreshDetail();
       onDecisionCommitted(`Decision saved. Audit #${audit.id.slice(-6)}.`);
     } catch (err: unknown) {
@@ -88,10 +90,15 @@ export const AlertDetailModal: React.FC<AlertDetailModalProps> = ({
   };
 
   const assetTier = detail?.evidence_pack?.asset_context?.criticality_tier ?? detail?.asset?.criticality_tier;
+  const auditTrail = detail?.decision_audit_trail ?? detail?.audit_trail;
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-sm flex items-center justify-center p-3 sm:p-5 animate-in fade-in duration-200">
-      <div role="dialog" aria-modal="true" aria-label="Alert details" className="w-full max-w-7xl h-[92vh] bg-black border border-zinc-800 rounded-2xl flex flex-col overflow-hidden shadow-2xl relative">
+    <Dialog open onOpenChange={(open) => { if (!open) close(); }} disablePointerDismissal>
+      <DialogContent showCloseButton={false} initialFocus={title} finalFocus={returnFocus}
+        className="flex h-dvh max-w-full flex-col gap-0 overflow-hidden rounded-none border border-border bg-background p-0 sm:h-[92dvh] sm:max-w-[min(80rem,calc(100%-2rem))] sm:rounded-xl">
+        <DialogTitle ref={title} tabIndex={-1} className="sr-only">
+          {detail ? `Alert details: ${detail.alert.rule_description}` : 'Alert details'}
+        </DialogTitle>
         {savedAuditId && (
           <div role="status" className="shrink-0 border-b border-emerald-900 bg-emerald-950/40 px-5 py-2 text-xs text-emerald-200">
             Decision saved. Audit #{savedAuditId.slice(-6)}.
@@ -117,7 +124,7 @@ export const AlertDetailModal: React.FC<AlertDetailModalProps> = ({
             </div>
             <div className="flex gap-3">
               <button type="button" onClick={refreshDetail} className="rounded border border-zinc-700 px-4 py-2 text-xs text-zinc-100">Retry alert</button>
-              <button type="button" onClick={onClose} className="rounded border border-zinc-800 px-4 py-2 text-xs text-zinc-300">Close</button>
+                <Button type="button" onClick={close} variant="outline">Close alert</Button>
             </div>
           </div>
         )}
@@ -126,7 +133,7 @@ export const AlertDetailModal: React.FC<AlertDetailModalProps> = ({
         {detail && !error && (
           <>
             {/* Modal Header */}
-            <div className="border-b border-zinc-800 bg-zinc-950 px-5 py-3.5 flex items-start justify-between gap-4 shrink-0">
+            <div className="border-b border-border bg-card px-3 py-3 sm:px-5 flex items-start justify-between gap-2 shrink-0">
               <div className="space-y-2 min-w-0">
                 {/* Meta pills row */}
                 <div className="flex flex-wrap items-center gap-2 text-[11px] font-mono text-zinc-400">
@@ -183,27 +190,39 @@ export const AlertDetailModal: React.FC<AlertDetailModalProps> = ({
               </div>
 
               {/* Close Button */}
-              <button
-                type="button"
-                onClick={onClose}
-                className="p-1.5 rounded-lg text-zinc-400 hover:text-zinc-100 hover:bg-zinc-900 border border-transparent hover:border-zinc-800 transition-colors"
-                title="Close modal (Esc)"
-              >
+              <Button type="button" onClick={close} size="icon" variant="ghost" className="size-11"
+                title="Close alert (Esc)" aria-label="Close alert">
                 <X className="size-5" />
-              </button>
+              </Button>
             </div>
 
-            {/* Split-Pane Body */}
-            <div className="flex-1 grid grid-cols-1 grid-rows-2 lg:grid-cols-2 lg:grid-rows-1 divide-y lg:divide-y-0 lg:divide-x divide-zinc-800/80 min-h-0 overflow-hidden bg-black">
-              {/* Left Pane: AI Assessment, Guardrails, Citations, Exemplars, Correlated Alerts */}
+            <div className={`flex flex-wrap items-center gap-1 border-b border-border px-2 py-1 ${auditTrail?.length ? 'lg:justify-end' : 'lg:hidden'}`} role="group" aria-label="Review sections">
+              <Button type="button" size="sm" variant={mobilePane === 'assessment' ? 'secondary' : 'ghost'}
+                className="min-h-9 lg:hidden" aria-pressed={mobilePane === 'assessment'} onClick={() => setMobilePane('assessment')}>Assessment</Button>
+              <Button type="button" size="sm" variant={mobilePane === 'evidence' ? 'secondary' : 'ghost'}
+                className="min-h-9 lg:hidden" aria-pressed={mobilePane === 'evidence'} onClick={() => setMobilePane('evidence')}>Evidence</Button>
+              {!!auditTrail?.length && (
+                <Button type="button" size="sm" variant="ghost" className="min-h-9" onClick={() => {
+                  setMobilePane('assessment');
+                  requestAnimationFrame(() => document.getElementById('alert-decision-history')?.focus());
+                }}>Decision history</Button>
+              )}
+            </div>
+
+            <div className="min-h-0 flex-1 overflow-y-auto lg:grid lg:grid-cols-2 lg:divide-x lg:divide-border lg:overflow-hidden">
+              <div className={mobilePane === 'assessment' ? 'min-h-0 min-w-0' : 'hidden min-h-0 min-w-0 lg:block'}>
               <AssessmentPane
                 alertDetail={detail}
                 selectedCitationKey={citation?.key ?? null}
-                onSelectCitationKey={(key) => setCitation({ key })}
+                onSelectCitationKey={(key) => {
+                  setMobilePane('evidence');
+                  setCitation({ key });
+                }}
                 savedAuditId={savedAuditId}
               />
+              </div>
 
-              {/* Right Pane: 3-Tab Evidence Tree & Prompt Inspector */}
+              <div className={mobilePane === 'evidence' ? 'min-h-0 min-w-0' : 'hidden min-h-0 min-w-0 lg:block'}>
               {detail.evidence_pack ? (
                 <EvidenceTreePane
                   evidencePack={detail.evidence_pack}
@@ -215,6 +234,7 @@ export const AlertDetailModal: React.FC<AlertDetailModalProps> = ({
                   {detail.alert.status === 'PENDING_REVIEW' ? 'Evidence pack pending.' : 'Evidence pack unavailable.'}
                 </div>
               )}
+              </div>
             </div>
 
             {/* Inline Submission Error Banner */}
@@ -235,11 +255,11 @@ export const AlertDetailModal: React.FC<AlertDetailModalProps> = ({
               availableActions={detail.available_actions}
               isSubmitting={isSubmitting}
               onSubmitDecision={handleSubmitDecision}
-              onCloseModal={onClose}
+              onCloseModal={close}
             />
           </>
         )}
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 };

@@ -92,6 +92,22 @@ def test_webhook_worker_permissions_and_evidence(contributor_test_engine, monkey
                 return {"Authorization": f"Bearer {response.json()['access_token']}"}
 
             lead_headers, analyst_headers = login(lead), login(analyst)
+            runtime_url = "/api/v1/runtime/settings"
+            assert client.get(runtime_url).status_code == 401
+            runtime = client.get(runtime_url, headers=analyst_headers)
+            assert runtime.status_code == 200
+            assert runtime.json() == {
+                "ingestion_mode": "replay",
+                "min_rule_level": 4,
+                "polling_interval_seconds": None,
+                "worker_status": "running",
+                "active_workers": 1,
+                "llm_provider": "mock",
+                "model_name": "mock",
+                "abstention_threshold": 0.6,
+                "max_exemplars_injected": 2,
+            }
+            assert client.patch("/api/v1/admin/config", headers=analyst_headers).status_code == 403
             assert client.get("/api/v1/analytics", headers=analyst_headers).status_code == 403
             assert client.get("/api/v1/analytics/export-csv", headers=analyst_headers).status_code == 403
             assert client.get("/api/v1/analytics?range=90d", headers=lead_headers).status_code == 200

@@ -14,8 +14,9 @@ export const OverrideTrendChart: React.FC<OverrideTrendChartProps> = ({
 
   if (isLoading || !data || data.length === 0) {
     return (
-      <div className="p-5 rounded-xl bg-zinc-950 border border-zinc-850 h-[380px] flex items-center justify-center text-zinc-500 font-mono text-xs">
-        {isLoading ? 'Loading override trend…' : 'No closure decisions in this range.'}
+      <div className="surface space-y-1 p-4 sm:p-5">
+        <h2 className="font-semibold">Daily override rate</h2>
+        <p className="text-sm text-muted-foreground">{isLoading ? 'Loading override trend…' : 'No closure decisions in this range. Try a longer date range or clear the Wazuh rule filter.'}</p>
       </div>
     );
   }
@@ -42,32 +43,32 @@ export const OverrideTrendChart: React.FC<OverrideTrendChartProps> = ({
   });
 
   // Construct SVG paths
+  const isConsecutive = (index: number) => index > 0
+    && Date.parse(points[index].date) - Date.parse(points[index - 1].date) === 86_400_000;
   const ratePath = points.map((point, index) => {
     if (point.yRate === null) return '';
-    const command = index > 0 && points[index - 1].yRate !== null ? 'L' : 'M';
+    const command = isConsecutive(index) && points[index - 1].yRate !== null ? 'L' : 'M';
     return `${command} ${point.x} ${point.yRate}`;
   }).join(' ');
-  const exemplarPath = points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.yExemplar}`).join(' ');
+  const exemplarPath = points.map((p, i) => `${isConsecutive(i) ? 'L' : 'M'} ${p.x} ${p.yExemplar}`).join(' ');
 
   const hoveredPoint = hoveredIndex !== null ? points[hoveredIndex] : null;
 
   return (
-    <div className="p-5 rounded-xl bg-zinc-950 border border-zinc-850 space-y-4">
+    <section className="surface p-4 sm:p-5 space-y-4" aria-labelledby="override-trend-title">
       {/* Header and Legend */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-2 border-b border-zinc-900">
         <div className="space-y-0.5">
           <div className="flex items-center gap-2">
-            <span className="text-xs font-mono font-bold text-zinc-100 uppercase tracking-wider">
-              Daily Override Rate
-            </span>
+            <h2 id="override-trend-title" className="font-semibold">Daily override rate</h2>
           </div>
           <p className="text-xs text-zinc-400 font-sans">
-            Override rate among approvals and overrides, with cumulative exemplar creation.
+            Each marker represents an observed day. The dashed series counts feedback examples created to date.
           </p>
         </div>
 
         {/* Legend */}
-        <div className="flex items-center gap-4 text-xs font-mono self-start sm:self-auto">
+        <div className="flex flex-wrap items-center gap-3 text-xs self-start sm:self-auto">
           <div className="flex items-center gap-1.5">
             <span className="size-2.5 rounded-full bg-cyan-400" />
             <span className="text-zinc-300">Override Rate (%)</span>
@@ -82,6 +83,8 @@ export const OverrideTrendChart: React.FC<OverrideTrendChartProps> = ({
       {/* SVG Container */}
       <div className="relative w-full overflow-hidden select-none">
         <svg
+          role="img"
+          aria-label="Daily override rates and cumulative feedback examples. The daily data table contains exact values."
           viewBox={`0 0 ${svgWidth} ${svgHeight}`}
           className="w-full h-auto overflow-visible font-mono"
         >
@@ -104,7 +107,7 @@ export const OverrideTrendChart: React.FC<OverrideTrendChartProps> = ({
                   y={y + 3}
                   textAnchor="end"
                   fontSize="10"
-                  fill="#71717a"
+                  fill="#a1a1aa"
                 >
                   {val}%
                 </text>
@@ -183,7 +186,7 @@ export const OverrideTrendChart: React.FC<OverrideTrendChartProps> = ({
                   y={padding.top + chartHeight + 18}
                   textAnchor="middle"
                   fontSize="10"
-                  fill={isHovered ? '#f4f4f5' : '#71717a'}
+                  fill={isHovered ? '#f4f4f5' : '#a1a1aa'}
                   fontWeight={isHovered ? 'bold' : 'normal'}
                 >
                   {(p.index % Math.ceil(points.length / 8) === 0 || p.index === points.length - 1) && p.date.slice(5)}
@@ -209,7 +212,7 @@ export const OverrideTrendChart: React.FC<OverrideTrendChartProps> = ({
             <div className="flex items-center justify-between gap-4">
               <span className="text-zinc-400">Override Rate:</span>
               <span className="text-cyan-300 font-bold">
-                {hoveredPoint.override_rate === null ? '—' : `${hoveredPoint.override_rate.toFixed(1)}%`}
+                {hoveredPoint.override_rate === null ? 'Unavailable' : `${hoveredPoint.override_rate.toFixed(1)}%`}
               </span>
             </div>
             <div className="flex items-center justify-between gap-4">
@@ -226,6 +229,36 @@ export const OverrideTrendChart: React.FC<OverrideTrendChartProps> = ({
         )}
       </div>
 
-    </div>
+      <details className="border-t border-border pt-2">
+        <summary className="cursor-pointer py-2 text-sm font-medium">View daily data</summary>
+        <div className="table-region" role="region" tabIndex={0} aria-label="Daily override data">
+          <table className="w-full text-left text-sm">
+            <caption className="sr-only">Daily overrides and cumulative feedback examples</caption>
+            <thead className="text-muted-foreground">
+              <tr>
+                <th scope="col" className="whitespace-nowrap p-2">Date (UTC)</th>
+                <th scope="col" className="p-2 text-right">Closures</th>
+                <th scope="col" className="p-2 text-right">Overrides</th>
+                <th scope="col" className="p-2 text-right">Approvals and overrides</th>
+                <th scope="col" className="p-2 text-right">Override rate</th>
+                <th scope="col" className="p-2 text-right">Cumulative examples</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border tabular-nums">
+              {data.map((point) => (
+                <tr key={point.date}>
+                  <th scope="row" className="whitespace-nowrap p-2 font-normal">{point.date}</th>
+                  <td className="p-2 text-right">{point.total_closed}</td>
+                  <td className="p-2 text-right">{point.override_count}</td>
+                  <td className="p-2 text-right">{point.total_decisions ?? 'Unavailable'}</td>
+                  <td className="p-2 text-right">{point.override_rate == null ? 'Unavailable' : `${point.override_rate.toFixed(1)}%`}</td>
+                  <td className="p-2 text-right">{point.exemplar_count}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </details>
+    </section>
   );
 };

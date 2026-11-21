@@ -133,9 +133,21 @@ class TriageWorker:
         self._queue = triage_queue if work_queue is None else work_queue
         self._lookups = lookups
         self._stop = threading.Event()
-        self._threads: list = []
+        self._threads: list[threading.Thread] = []
         self._inflight: set = set()
         self._lock = threading.Lock()
+
+    @property
+    def provider_name(self) -> str:
+        return self._adapter.provider_name
+
+    @property
+    def model_name(self) -> str:
+        return self._adapter.model_name
+
+    @property
+    def active_workers(self) -> int:
+        return sum(thread.is_alive() for thread in self._threads if thread.name != "triage-sweeper")
 
     def start(self) -> None:
         for n in range(self._workers):

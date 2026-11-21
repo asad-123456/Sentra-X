@@ -297,7 +297,10 @@ export interface AnalyticsSummary {
   audit_event_count?: number;
   total_closed: number;
   comparison_count: number;
+  approved_count?: number;
   overridden_count: number;
+  escalation_count?: number;
+  manual_fallback_count?: number;
   guardrail_interventions: number;
   agreement_rate: number | null;
   override_rate: number | null;
@@ -356,6 +359,9 @@ export interface BenchmarkComparativeScorecard {
 export interface EvaluationReport {
   timestamp: string;
   dataset_name: string;
+  provider?: string;
+  model?: string;
+  accuracy_set_size?: number;
   total_payloads: number;
   baseline_bypass_rate: number | null;
   sentrax_bypass_rate: number | null;
@@ -383,4 +389,19 @@ export interface SystemConfig {
   last_sync_timestamp: string;
 }
 
+export interface RuntimeSettings {
+  ingestion_mode: 'poll' | 'webhook' | 'replay' | 'unknown';
+  min_rule_level: number;
+  polling_interval_seconds: number | null;
+  worker_status: 'running' | 'disabled' | 'stopped';
+  active_workers: number;
+  llm_provider: string | null;
+  model_name: string | null;
+  abstention_threshold: number;
+  max_exemplars_injected: number;
+}
+
+export type RuntimeSettingsState =
+  | { status: 'loading' | 'error' }
+  | { status: 'ready'; settings: RuntimeSettings; checkedAt: string };
 

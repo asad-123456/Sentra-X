@@ -1,14 +1,16 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { AlertCircle, ArrowRight } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import type { UserRole } from '../types/sentrax';
+import { ApiError } from '../api/client';
 
 export const LoginView: React.FC = () => {
-  const { login, isLoading, switchDemoRole } = useAuth();
+  const { login, isLoading, sessionExpired, switchDemoRole } = useAuth();
   const [usernameOrEmail, setUsernameOrEmail] = useState(switchDemoRole ? 'analyst@sentrax.internal' : '');
   const [password, setPassword] = useState('');
   const [errorBanner, setErrorBanner] = useState<string | null>(null);
+  const passwordField = useRef<HTMLInputElement>(null);
 
   const navigate = useNavigate();
   const location = useLocation();
@@ -24,11 +26,11 @@ export const LoginView: React.FC = () => {
       await login(usernameOrEmail, password);
       navigate(from, { replace: true });
     } catch (err) {
-      if (err instanceof Error) {
-        setErrorBanner(err.message);
-      } else {
-        setErrorBanner('HTTP 401 Unauthorized: Invalid username or password.');
-      }
+      const invalid = (err instanceof ApiError && err.status === 401) || !!switchDemoRole;
+      setErrorBanner(invalid
+        ? 'Check your username or password and try again.'
+        : 'Unable to sign in. Try again, or contact your administrator.');
+      passwordField.current?.focus();
     }
   };
 
@@ -40,9 +42,7 @@ export const LoginView: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-black text-zinc-100 flex flex-col justify-center items-center p-6 selection:bg-zinc-800 selection:text-white">
-      {/* Background radial accent */}
-      <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_40%,rgba(255,255,255,0.03),transparent_60%)] pointer-events-none" />
+    <main className="min-h-screen bg-background text-foreground flex flex-col justify-center items-center p-5 sm:p-6">
 
       <div className="w-full max-w-md relative z-10 space-y-6">
         {/* Brand Header */}
@@ -63,16 +63,17 @@ export const LoginView: React.FC = () => {
             </svg>
             <span className="font-semibold tracking-wider">SENTRA-X</span>
           </div>
-          <h1 className="text-2xl font-bold tracking-tight text-zinc-50 font-mono">
+          <h1 className="page-title">
             Security Operations Workspace
           </h1>
         </div>
 
         {/* Login Card */}
-        <div className="bg-zinc-950 border border-zinc-800 rounded-xl p-6 shadow-2xl space-y-5">
+        <div className="surface p-5 sm:p-6 space-y-5">
+          {sessionExpired && !errorBanner && <p role="status" className="text-sm text-zinc-200">Sign in again to continue.</p>}
           {/* Inline Error Alert Banner */}
           {errorBanner && (
-            <div role="alert" className="p-3.5 rounded-lg bg-red-950/30 border border-red-500/40 text-red-300 text-xs font-mono flex items-start gap-2.5 shadow-[0_0_12px_rgba(239,68,68,0.15)]">
+            <div id="sign-in-error" role="alert" className="p-3 rounded-lg bg-red-950/40 border border-red-800 text-red-200 text-sm flex items-start gap-2">
               <AlertCircle className="size-4 text-red-400 shrink-0 mt-0.5" />
               <span>{errorBanner}</span>
             </div>
@@ -82,7 +83,7 @@ export const LoginView: React.FC = () => {
             <div className="space-y-1.5">
               <label
                 htmlFor="usernameOrEmail"
-                className="text-xs font-mono font-medium text-zinc-300"
+                className="text-sm font-medium text-foreground"
               >
                 Username or Email Address
               </label>
@@ -93,26 +94,27 @@ export const LoginView: React.FC = () => {
                 required
                 value={usernameOrEmail}
                 onChange={(e) => setUsernameOrEmail(e.target.value)}
-                className="w-full px-3 py-2 rounded-lg bg-black border border-zinc-800 focus:border-zinc-500 text-zinc-100 text-sm font-mono focus:outline-none focus:ring-1 focus:ring-zinc-400 transition-all placeholder:text-zinc-600"
+                className="field"
               />
             </div>
 
             <div className="space-y-1.5">
               <label
                 htmlFor="password"
-                className="text-xs font-mono font-medium text-zinc-300"
+                className="text-sm font-medium text-foreground"
               >
                 Password
               </label>
               <input
                 id="password"
+                ref={passwordField}
                 type="password"
                 autoComplete="current-password"
                 required
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                placeholder="••••••••••••"
-                className="w-full px-3 py-2 rounded-lg bg-black border border-zinc-800 focus:border-zinc-500 text-zinc-100 text-sm font-mono focus:outline-none focus:ring-1 focus:ring-zinc-400 transition-all placeholder:text-zinc-600"
+                aria-describedby={errorBanner ? 'sign-in-error' : undefined}
+                className="field"
               />
               {switchDemoRole && <p className="text-[11px] text-zinc-500 font-mono">Demo password: password123</p>}
             </div>
@@ -159,7 +161,7 @@ export const LoginView: React.FC = () => {
           )}
         </div>
       </div>
-    </div>
+    </main>
   );
 };
 

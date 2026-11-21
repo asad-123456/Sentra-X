@@ -7,7 +7,6 @@ import {
   Shield,
   Save,
   Check,
-  X,
   Loader2,
   Server,
   AlertCircle,
@@ -129,20 +128,21 @@ export const AssetRegistryTable: React.FC<AssetRegistryTableProps> = ({
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-3.5 text-zinc-500" />
           <input
             type="text"
+            aria-label="Search host registry"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder="Search by agent ID, hostname, IP, or description..."
-            className="w-full pl-9 pr-3 py-1.5 bg-zinc-900 border border-zinc-800 rounded-lg text-xs font-mono text-zinc-100 placeholder:text-zinc-600 focus:outline-none focus:border-zinc-700 transition-colors"
+            className="field pl-9"
           />
         </div>
 
-        {onRegisterAsset && <button
+        {onRegisterAsset && !showAddForm && <button
           type="button"
           onClick={() => setShowAddForm(!showAddForm)}
           className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-lg bg-white hover:bg-zinc-200 text-black font-semibold text-xs font-mono shadow-md transition-colors cursor-pointer self-start sm:self-auto"
         >
           <Plus className="size-3.5" />
-          <span>Register Host</span>
+          <span>Register host</span>
         </button>}
       </div>
 
@@ -157,17 +157,10 @@ export const AssetRegistryTable: React.FC<AssetRegistryTableProps> = ({
               <Server className="size-4 text-cyan-400" />
               <span>Register Monitored Host into Asset Registry</span>
             </div>
-            <button
-              type="button"
-              onClick={() => setShowAddForm(false)}
-              className="text-zinc-400 hover:text-zinc-200"
-            >
-              <X className="size-4" />
-            </button>
           </div>
 
           {formError && (
-            <div className="p-3 rounded-lg bg-red-950/60 border border-red-800 text-red-200 text-xs font-mono flex items-center gap-2">
+            <div id="registry-form-error" role="alert" className="p-3 rounded-lg bg-red-950/60 border border-red-800 text-red-200 text-sm flex items-center gap-2">
               <AlertCircle className="size-4 text-red-400 shrink-0" />
               <span>{formError}</span>
             </div>
@@ -175,47 +168,56 @@ export const AssetRegistryTable: React.FC<AssetRegistryTableProps> = ({
 
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
             <div className="space-y-1">
-              <label className="text-[10px] font-mono text-zinc-400">AGENT ID *</label>
+              <label htmlFor="registry-agent-id" className="text-sm text-foreground">Agent ID</label>
               <input
+                id="registry-agent-id"
+                maxLength={64}
+                aria-describedby={formError ? 'registry-agent-limit registry-form-error' : 'registry-agent-limit'}
                 type="text"
                 value={newAgentId}
                 onChange={(e) => setNewAgentId(e.target.value)}
                 placeholder="007"
-                className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-1.5 text-xs font-mono text-zinc-100 focus:outline-none focus:border-zinc-700"
+                className="field"
                 required
               />
+              <p id="registry-agent-limit" className="text-xs text-muted-foreground">Wazuh agent ID, up to 64 characters.</p>
             </div>
 
             <div className="space-y-1">
-              <label className="text-[10px] font-mono text-zinc-400">HOSTNAME *</label>
+              <label htmlFor="registry-hostname" className="text-sm text-foreground">Hostname</label>
               <input
+                id="registry-hostname"
+                maxLength={255}
+                aria-describedby={formError ? 'registry-form-error' : undefined}
                 type="text"
                 value={newHostname}
                 onChange={(e) => setNewHostname(e.target.value)}
                 placeholder="CORP-EXCHANGE-01"
-                className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-1.5 text-xs font-mono text-zinc-100 focus:outline-none focus:border-zinc-700 uppercase"
+                className="field"
                 required
               />
             </div>
 
             <div className="space-y-1">
-              <label htmlFor="registry-ip" className="text-[10px] font-mono text-zinc-400">IP ADDRESS</label>
+              <label htmlFor="registry-ip" className="text-sm text-foreground">IP address (optional)</label>
               <input
                 id="registry-ip"
+                maxLength={45}
                 type="text"
                 value={newIpAddress}
                 onChange={(e) => setNewIpAddress(e.target.value)}
                 placeholder="10.0.1.25"
-                className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-1.5 text-xs font-mono text-zinc-100 focus:outline-none focus:border-zinc-700"
+                className="field"
               />
             </div>
 
             <div className="space-y-1">
-              <label className="text-[10px] font-mono text-zinc-400">CRITICALITY TIER</label>
+              <label htmlFor="registry-tier" className="text-sm text-foreground">Criticality tier</label>
               <select
+                id="registry-tier"
                 value={newTier}
                 onChange={(e) => setNewTier(e.target.value as AssetCriticalityTier)}
-                className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-1.5 text-xs font-mono text-zinc-100 focus:outline-none focus:border-zinc-700 cursor-pointer"
+                className="field"
               >
                 <option value="CRITICAL">CRITICAL (Crown Jewel)</option>
                 <option value="HIGH">HIGH (Infrastructure)</option>
@@ -226,13 +228,14 @@ export const AssetRegistryTable: React.FC<AssetRegistryTableProps> = ({
           </div>
 
           <div className="space-y-1">
-            <label className="text-[10px] font-mono text-zinc-400">DESCRIPTION (OPTIONAL)</label>
+            <label htmlFor="registry-description" className="text-sm text-foreground">Description (optional)</label>
             <input
+              id="registry-description"
               type="text"
               value={newDesc}
               onChange={(e) => setNewDesc(e.target.value)}
               placeholder="Primary internal email server and mail routing gateway..."
-              className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-1.5 text-xs font-sans text-zinc-100 focus:outline-none focus:border-zinc-700"
+              className="field"
             />
           </div>
 
@@ -249,7 +252,7 @@ export const AssetRegistryTable: React.FC<AssetRegistryTableProps> = ({
               disabled={isRegistering}
               className="px-4 py-1.5 rounded-lg bg-white hover:bg-zinc-200 text-black font-semibold text-xs font-mono shadow-md transition-colors cursor-pointer disabled:opacity-50"
             >
-              {isRegistering ? 'Registering...' : 'Register Asset'}
+              {isRegistering ? 'Registering…' : 'Register host'}
             </button>
           </div>
         </form>
@@ -273,14 +276,13 @@ export const AssetRegistryTable: React.FC<AssetRegistryTableProps> = ({
 
       {/* Asset Table */}
       <div className="rounded-xl border border-zinc-850 bg-zinc-950 overflow-hidden shadow-sm">
-        <div className="overflow-x-auto custom-scrollbar">
+        <div className="table-region" tabIndex={0} role="region" aria-label="Host registry table">
           <table className="w-full text-left border-collapse text-xs">
             <thead>
               <tr className="border-b border-zinc-850 bg-zinc-900/60 font-mono text-[10px] text-zinc-400 uppercase tracking-wider">
                 <th className="py-3 px-4 font-semibold">Agent ID &amp; Hostname</th>
-                <th className="py-3 px-4 font-semibold">IP Address</th>
                 <th className="py-3 px-4 font-semibold">Criticality Tier</th>
-                <th className="py-3 px-4 font-semibold max-w-sm">Asset Description</th>
+                <th className="py-3 px-4 font-semibold max-w-sm">Host details</th>
                 <th className="py-3 px-4 font-semibold">Updated</th>
                 <th className="py-3 px-4 font-semibold text-right">Registry Action</th>
               </tr>
@@ -288,7 +290,7 @@ export const AssetRegistryTable: React.FC<AssetRegistryTableProps> = ({
             <tbody className="divide-y divide-zinc-850/60">
               {isLoading && (
                 <tr>
-                  <td colSpan={6} className="py-12 text-center text-zinc-500 font-mono">
+                  <td colSpan={5} className="py-12 text-center text-zinc-400 font-mono">
                     <Loader2 className="size-5 text-cyan-400 animate-spin mx-auto mb-2" />
                     <span>Loading monitored assets from registry...</span>
                   </td>
@@ -297,7 +299,7 @@ export const AssetRegistryTable: React.FC<AssetRegistryTableProps> = ({
 
               {!isLoading && filteredAssets.length === 0 && (
                 <tr>
-                  <td colSpan={6} className="py-12 text-center text-zinc-500 font-mono space-y-1">
+                  <td colSpan={5} className="py-12 text-center text-zinc-400 font-mono space-y-1">
                     <Shield className="size-6 text-zinc-600 mx-auto" />
                     <div className="text-zinc-300 font-bold">No assets found</div>
                     <div className="text-[11px] text-zinc-500 font-sans">
@@ -324,15 +326,11 @@ export const AssetRegistryTable: React.FC<AssetRegistryTableProps> = ({
                         </div>
                       </td>
 
-                      {/* IP Address */}
-                      <td className="py-3.5 px-4 font-mono text-zinc-300">
-                        {asset.ip_address ?? '—'}
-                      </td>
-
                       {/* Criticality Tier */}
                       <td className="py-3.5 px-4">
                         {isEditing ? (
                           <select
+                            aria-label={`Criticality for ${asset.hostname}`}
                             value={editTier}
                             onChange={(e) => setEditTier(e.target.value as AssetCriticalityTier)}
                             className="bg-zinc-900 border border-zinc-700 rounded-lg px-2.5 py-1 text-xs font-mono text-zinc-100 focus:outline-none focus:border-cyan-500 cursor-pointer"
@@ -346,7 +344,7 @@ export const AssetRegistryTable: React.FC<AssetRegistryTableProps> = ({
                           <div className="flex items-center gap-2">
                             <AssetTierBadge tier={asset.criticality_tier} />
                             {isSavedSuccess && (
-                              <span className="inline-flex items-center gap-1 text-[10px] font-mono text-emerald-400">
+                              <span role="status" className="inline-flex items-center gap-1 text-xs text-emerald-400">
                                 <Check className="size-3" />
                                 <span>Saved</span>
                               </span>
@@ -357,8 +355,10 @@ export const AssetRegistryTable: React.FC<AssetRegistryTableProps> = ({
 
                       {/* Description */}
                       <td className="py-3.5 px-4 max-w-sm">
+                        {asset.ip_address && <div className="mb-1 font-mono text-zinc-300">{asset.ip_address}</div>}
                         {isEditing ? (
                           <input
+                            aria-label={`Description for ${asset.hostname}`}
                             type="text"
                             value={editDesc}
                             onChange={(e) => setEditDesc(e.target.value)}
@@ -405,7 +405,7 @@ export const AssetRegistryTable: React.FC<AssetRegistryTableProps> = ({
                             onClick={() => handleStartEdit(asset)}
                             className="px-3 py-1 rounded-lg bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-xs font-mono text-zinc-300 hover:text-white transition-colors cursor-pointer"
                           >
-                            Configure
+                            Edit host
                           </button>
                         )}
                       </td>

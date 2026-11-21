@@ -36,13 +36,17 @@ export const AssessmentPane: React.FC<AssessmentPaneProps> = ({
   const injected_exemplars = alertDetail.injected_exemplars || alertDetail.relevant_exemplars || [];
   const correlated_alerts = alertDetail.correlated_alerts || alertDetail.evidence_pack?.temporal_context || [];
   const decision_audit_trail = alertDetail.decision_audit_trail || alertDetail.audit_trail || [];
+  const citationKeys = assessment?.cited_evidence_keys ?? [];
+  const validCitationKeys = evidence_pack?.valid_dot_keys
+    ? citationKeys.filter((key) => evidence_pack.valid_dot_keys?.includes(key))
+    : evidence_pack ? citationKeys : [];
   const savedAudit = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (savedAuditId) savedAudit.current?.scrollIntoView({ block: 'center' });
   }, [savedAuditId]);
 
   return (
-    <div className="h-full overflow-y-auto p-5 space-y-6 text-zinc-100 font-mono text-xs pr-4 custom-scrollbar">
+    <div className="flex flex-col gap-4 p-3 text-foreground text-sm sm:p-5 lg:h-full lg:overflow-y-auto [&>*]:shrink-0">
       {/* 1. Guardrail Intervention Banners */}
       <div className="space-y-3">
         {/* Safety Floor Banner */}
@@ -165,20 +169,13 @@ export const AssessmentPane: React.FC<AssessmentPaneProps> = ({
 
           {/* Confidence Meter */}
           <div className="space-y-1 pt-1">
-            <div className="flex items-center justify-between text-[10px] text-zinc-500">
-              <span>MODEL CONFIDENCE</span>
-              <span className="text-zinc-400">
-                {assessment.confidence_score !== null && assessment.confidence_score !== undefined
-                  ? `${Math.round(assessment.confidence_score * 100)}%`
-                  : 'Undetermined'}
-              </span>
-            </div>
+            <p className="text-xs text-muted-foreground">Model confidence</p>
             <ConfidenceMeter score={assessment.confidence_score} />
           </div>
 
           {/* Full Explanation */}
           <div className="space-y-1.5 pt-1">
-            <span className="text-[10px] text-zinc-500 font-mono">ANALYST EXPLANATION</span>
+            <span className="text-xs text-muted-foreground">Model explanation</span>
             <div className="p-3 rounded-lg bg-zinc-900/70 border border-zinc-800 text-zinc-200 font-sans text-xs leading-relaxed">
               {assessment.explanation}
             </div>
@@ -199,32 +196,31 @@ export const AssessmentPane: React.FC<AssessmentPaneProps> = ({
       )}
 
       {/* 3. Interactive Cited Evidence Key Pills */}
-      {assessment?.cited_evidence_keys && assessment.cited_evidence_keys.length > 0 && (
+      {citationKeys.length > 0 && (
         <div className="p-4 rounded-xl bg-zinc-950 border border-zinc-800 space-y-3">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2 text-zinc-200 font-semibold text-xs">
               <Link2 className="size-4 text-cyan-400" />
               <span>Evidence Citations</span>
             </div>
-            <span className="text-[10px] text-zinc-500">
-              {assessment.cited_evidence_keys.length} verified fields
+            <span className="text-xs text-muted-foreground">
+              {validCitationKeys.length} available
             </span>
           </div>
 
-          <p className="text-[11px] text-zinc-400 font-sans">
-            Click any citation key below to immediately scroll and highlight its verified telemetry path in the evidence tree:
-          </p>
-
-          <div className="flex flex-wrap gap-2 pt-1">
-            {assessment.cited_evidence_keys.map((key) => {
+          <div className="grid gap-2">
+            {citationKeys.map((key) => {
               const isSelected = selectedCitationKey === key;
+              const available = validCitationKeys.includes(key);
+              const field = (key.split('.').at(-1) ?? key).replace(/([a-z])([A-Z])/g, '$1 $2').replaceAll('_', ' ');
               return (
                 <button
                   key={key}
                   type="button"
                   aria-pressed={isSelected}
+                  disabled={!available}
                   onClick={() => onSelectCitationKey(key)}
-                  className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-mono transition-all cursor-pointer ${
+                  className={`flex min-h-11 items-start gap-2 px-2.5 py-2 rounded-md text-left text-sm transition-colors disabled:cursor-default ${
                     isSelected
                       ? 'bg-cyan-950 text-cyan-200 border border-cyan-500 shadow-[0_0_10px_rgba(6,182,212,0.3)] ring-1 ring-cyan-400'
                       : 'bg-zinc-900 hover:bg-zinc-850 text-zinc-300 hover:text-white border border-zinc-800 hover:border-zinc-700'
@@ -232,7 +228,10 @@ export const AssessmentPane: React.FC<AssessmentPaneProps> = ({
                   title={`Highlight field "${key}" in evidence tree`}
                 >
                   <FileCode className={`size-3 ${isSelected ? 'text-cyan-400' : 'text-zinc-500'}`} />
-                  <span className="truncate max-w-[280px]">{key}</span>
+                  <span className="min-w-0">
+                    <span className="block font-medium capitalize">{field}{!available && ' · unavailable'}</span>
+                    <span className="block font-mono text-xs text-muted-foreground [overflow-wrap:anywhere]">{key}</span>
+                  </span>
                 </button>
               );
             })}
@@ -242,7 +241,7 @@ export const AssessmentPane: React.FC<AssessmentPaneProps> = ({
 
       {/* 4. Matched Few-Shot Feedback Exemplars */}
       {injected_exemplars && injected_exemplars.length > 0 && (
-        <div className="p-4 rounded-xl bg-zinc-950 border border-zinc-800 space-y-3">
+        <div className="surface p-4 space-y-3">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2 text-zinc-200 font-semibold text-xs">
               <BookmarkCheck className="size-4 text-emerald-400" />
@@ -348,11 +347,12 @@ export const AssessmentPane: React.FC<AssessmentPaneProps> = ({
 
       {/* 6. Immutable Decision Audit Trail */}
       {decision_audit_trail && decision_audit_trail.length > 0 && (
-        <div className="p-4 rounded-xl bg-zinc-950 border border-zinc-800 space-y-3">
+        <section id="alert-decision-history" aria-label="Decision history" tabIndex={-1}
+          className={`surface p-4 space-y-3 ${alert.status === 'CLOSED' ? 'order-first' : ''}`}>
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2 text-zinc-200 font-semibold text-xs">
               <History className="size-4 text-zinc-400" />
-              <span>Immutable Decision Audit Trail</span>
+              <h3 className="text-sm">Decision history</h3>
             </div>
             <ShieldCheck className="size-4 text-emerald-400" />
           </div>
@@ -385,7 +385,7 @@ export const AssessmentPane: React.FC<AssessmentPaneProps> = ({
               </div>
             ))}
           </div>
-        </div>
+        </section>
       )}
     </div>
   );

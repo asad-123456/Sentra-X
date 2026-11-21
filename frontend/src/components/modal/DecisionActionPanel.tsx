@@ -21,6 +21,7 @@ import {
   ArrowLeft,
   CheckCircle2,
 } from 'lucide-react';
+import { Button } from '../ui/button';
 
 interface DecisionActionPanelProps {
   alert: Alert;
@@ -160,7 +161,7 @@ export const DecisionActionPanel: React.FC<DecisionActionPanelProps> = ({
   const reviewLabel = isManualDisposition || isResolving ? 'Review Disposition' : 'Review Override';
 
   return (
-    <div className="border-t border-zinc-800 bg-zinc-950 p-4 shrink-0 max-h-[68%] overflow-y-auto space-y-4">
+    <div className="border-t border-border bg-card p-3 sm:p-4 shrink-0 max-h-[68%] overflow-y-auto space-y-4">
       {/* Inline Forms for Override, Manual Close, or Resolve Escalation */}
       {panelMode !== 'none' && panelMode !== 'approve_prompt' && (
         <form
@@ -506,75 +507,36 @@ export const DecisionActionPanel: React.FC<DecisionActionPanelProps> = ({
       {/* Main Bottom Toolbar */}
       {panelMode === 'none' && (
         <div className="flex flex-wrap items-center justify-between gap-4">
-          <div className="text-xs font-mono text-zinc-500">
+          <div className="text-xs text-muted-foreground">
             {isClosed ? (
-              <span className="text-zinc-400">Status: Terminal closed in immutable audit log</span>
+              <span>Closed · Decision saved in the audit log</span>
             ) : isEscalated ? (
-              <span className="text-amber-400">Status: Escalated for Tier-2 / Lead review</span>
+              <span className="text-amber-300">Escalated for lead review</span>
             ) : isNeedsManual ? (
-              <span className="text-purple-400">Status: Automated triage exhausted — manual decision required</span>
+              <span className="text-amber-300">Manual decision required</span>
             ) : isPending ? (
               <span className="text-zinc-300">AI triage pending. You can close this alert manually.</span>
             ) : (
-              <span className="text-zinc-300">Status: Actionable analyst review required</span>
+              <span>Ready for analyst review</span>
             )}
           </div>
 
           {/* Action Button Groups */}
-          <div className="flex flex-wrap items-center gap-2.5">
-            {/* Close Modal Button */}
-            <button
-              type="button"
-              onClick={onCloseModal}
-              className="px-4 py-2 rounded-lg bg-zinc-900 hover:bg-zinc-850 border border-zinc-800 text-xs font-mono text-zinc-300 hover:text-white transition-colors"
-            >
-              Close
-            </button>
-
-            {supports('RETRY_AI') && (
-              <button
-                type="button"
-                onClick={handleRetryClick}
-                disabled={isSubmitting}
-                className="flex items-center gap-1.5 rounded-lg border border-zinc-700 bg-zinc-900 px-3.5 py-2 text-xs font-mono text-zinc-200 hover:bg-zinc-800 disabled:opacity-50"
-              >
-                <RotateCcw className="size-3.5" /> Retry AI Triage
-              </button>
-            )}
-            {supports('ESCALATE') && (
-              <button
-                type="button"
-                onClick={handleEscalateClick}
-                disabled={isSubmitting}
-                className="flex items-center gap-1.5 rounded-lg border border-amber-800 bg-amber-950/60 px-3.5 py-2 text-xs font-mono text-amber-200 hover:bg-amber-900/60 disabled:opacity-50"
-              >
-                <Flame className="size-3.5" /> Escalate
-              </button>
-            )}
-            {supports('OVERRIDE') && (
-              <button
-                type="button"
-                onClick={() => setPanelMode('override')}
-                disabled={isSubmitting}
-                className="flex items-center gap-1.5 rounded-lg border border-zinc-700 bg-zinc-900 px-3.5 py-2 text-xs font-mono text-zinc-200 hover:bg-zinc-800 disabled:opacity-50"
-              >
-                <Edit3 className="size-3.5" /> Override Decision
-              </button>
-            )}
+          <div className="flex flex-wrap items-start gap-2">
             {supports('APPROVE') && (
-              <button
+              <Button
                 type="button"
                 onClick={handleApproveClick}
                 disabled={isSubmitting}
-                className="flex items-center gap-1.5 rounded-lg bg-white px-5 py-2 text-xs font-mono font-bold text-black hover:bg-zinc-200 disabled:opacity-50"
+                className="min-h-11"
               >
                 <Check className="size-4 text-emerald-600" />
                 {assessment?.abstention_triggered || assessment?.effective_verdict === 'NEEDS_ANALYST_REVIEW'
                   ? 'Confirm Verdict' : 'Approve Assessment'}
-              </button>
+              </Button>
             )}
             {supports('MANUAL_TRIAGE_CLOSURE') && (
-              <button
+              <Button
                 type="button"
                 onClick={() => {
                   if (isPending) {
@@ -585,21 +547,32 @@ export const DecisionActionPanel: React.FC<DecisionActionPanelProps> = ({
                   setPanelMode('manual_close');
                 }}
                 disabled={isSubmitting}
-                className="flex items-center gap-1.5 rounded-lg bg-white px-5 py-2 text-xs font-mono font-bold text-black hover:bg-zinc-200 disabled:opacity-50"
+                className="min-h-11"
               >
                 <Check className="size-4 text-purple-600" /> Manual Disposition
-              </button>
+              </Button>
             )}
             {supports('RESOLVE_ESCALATION') && (
-              <button
+              <Button
                 type="button"
                 onClick={() => setPanelMode('resolve_escalation')}
                 disabled={isSubmitting}
-                className="flex items-center gap-1.5 rounded-lg bg-white px-5 py-2 text-xs font-mono font-bold text-black hover:bg-zinc-200 disabled:opacity-50"
+                className="min-h-11"
               >
                 <Check className="size-4 text-amber-600" /> Resolve Escalation
-              </button>
+              </Button>
             )}
+            {(supports('RETRY_AI') || supports('ESCALATE') || supports('OVERRIDE')) && (
+              <details className="rounded-lg border border-zinc-700 bg-background">
+                <summary className="min-h-10 cursor-pointer px-3 py-2 text-sm">More actions</summary>
+                <div className="grid gap-1 border-t border-border p-1">
+                  {supports('OVERRIDE') && <Button variant="ghost" disabled={isSubmitting} onClick={() => setPanelMode('override')}><Edit3 /> Override decision</Button>}
+                  {supports('ESCALATE') && <Button variant="ghost" disabled={isSubmitting} onClick={handleEscalateClick}><Flame /> Escalate</Button>}
+                  {supports('RETRY_AI') && <Button variant="ghost" disabled={isSubmitting} onClick={handleRetryClick}><RotateCcw /> Retry AI triage</Button>}
+                </div>
+              </details>
+            )}
+            {isClosed && <Button type="button" variant="outline" onClick={onCloseModal}>Close</Button>}
             {isEscalated && !supports('RESOLVE_ESCALATION') && (
               <span className="text-xs font-mono text-zinc-400">Team Lead or Admin can resolve this alert.</span>
             )}

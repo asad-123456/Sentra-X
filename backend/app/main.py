@@ -1,12 +1,16 @@
 from __future__ import annotations
 
 import logging
-from fastapi import FastAPI, Request, status
+from typing import Literal
+
+from fastapi import Depends, FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
+from .auth import require_roles
 from .config import settings
 from .database import sync_engine
 from contextlib import asynccontextmanager
@@ -17,7 +21,10 @@ from .ingestion.sources import IndexerSource
 from .ingestion.wazuh_settings import get_wazuh_settings
 from .ingestion.webhook import router as webhook_router
 from .routers import admin, alerts, analytics, auth, evaluation, governance
+from .services.evidence_assembler import MAX_EXEMPLARS
+from .services.rules_engine import MIN_CONFIDENCE
 from .worker.triage_worker import start_worker, stop_worker
+from .worker.worker_settings import get_worker_settings
 
 logger = logging.getLogger("sentrax.api")
 
@@ -33,7 +40,7 @@ async def lifespan(app: FastAPI):
             get_session_factory(), w.WAZUH_POLL_INTERVAL_SECONDS, w.WAZUH_MIN_LEVEL,
         )
     try:
-        start_worker()
+        app.state.triage_worker = start_worker()
         if poller:
             poller.start()
         yield
@@ -43,6 +50,7 @@ async def lifespan(app: FastAPI):
                 poller.stop()
         finally:
             stop_worker()
+            app.state.triage_worker = None
 
 
 app = FastAPI(
@@ -94,6 +102,48 @@ def root():
         "version": "1.0.0",
         "documentation": "/docs",
     }
+
+
+class RuntimeSettings(BaseModel):
+    ingestion_mode: Literal["poll", "webhook", "replay", "unknown"]
+    min_rule_level: int
+    polling_interval_seconds: int | None
+    worker_status: Literal["running", "disabled", "stopped"]
+    active_workers: int
+    llm_provider: str | None
+    model_name: str | None
+    abstention_threshold: float
+    max_exemplars_injected: int
+
+
+@app.get(
+    "/api/v1/runtime/settings",
+    dependencies=[Depends(require_roles("Analyst", "TeamLead", "Admin"))],
+)
+def get_runtime_settings(request: Request) -> RuntimeSettings:
+    """Report process settings and worker threads without probing external services."""
+    wazuh = get_wazuh_settings()
+    mode = wazuh.WAZUH_INGEST_MODE
+    worker = getattr(request.app.state, "triage_worker", None)
+    active_workers = worker.active_workers if worker is not None else 0
+    if active_workers:
+        worker_status = "running"
+    elif not get_worker_settings().TRIAGE_ENABLED:
+        worker_status = "disabled"
+    else:
+        worker_status = "stopped"
+
+    return RuntimeSettings(
+        ingestion_mode=mode if mode in {"poll", "webhook", "replay"} else "unknown",
+        min_rule_level=wazuh.WAZUH_MIN_LEVEL,
+        polling_interval_seconds=wazuh.WAZUH_POLL_INTERVAL_SECONDS if mode == "poll" else None,
+        worker_status=worker_status,
+        active_workers=active_workers,
+        llm_provider=worker.provider_name if active_workers else None,
+        model_name=worker.model_name if active_workers else None,
+        abstention_threshold=MIN_CONFIDENCE,
+        max_exemplars_injected=MAX_EXEMPLARS,
+    )
 
 
 @app.get("/api/health")
