@@ -570,7 +570,6 @@ def triage_alert(
     try:
         user_prompt = build_user_prompt(ep, exemplars)
     except Exception as exc:
-        logger.exception("Could not build the prompt")
         return TriageCallResult(
             None, adapter.model_name, _elapsed_ms(start, clock), 0, False,
             f"prompt build failed: {type(exc).__name__}",
@@ -587,11 +586,12 @@ def triage_alert(
                 output, adapter.model_name, _elapsed_ms(start, clock), retries, True
             )
         except LLMCallError as exc:
-            last_error = f"{type(exc).__name__}: {exc}"
+            last_error = type(exc).__name__
+            if isinstance(exc, LLMHTTPError):
+                last_error += f" (HTTP {exc.status_code})"
             retryable = exc.retryable
         except Exception as exc:  # a bug or an unknown SDK error must not kill the worker
-            logger.exception("Unexpected error while calling the LLM")
-            last_error = f"{type(exc).__name__}: {exc}"
+            last_error = type(exc).__name__
             retryable = False
 
         if not retryable or retries >= max_retries:

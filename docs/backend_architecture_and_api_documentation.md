@@ -19,8 +19,10 @@ The application prefix is `/api/v1`. The paths in the first table already includ
 | Method and path | Behavior |
 | --- | --- |
 | `GET /` | Service identity and documentation path. |
-| `GET /api/health` | Database reachability in the response body. Check the JSON `status` for `HEALTHY` or `DEGRADED`. |
-| `POST /api/webhooks/wazuh` | HMAC-authenticated alert ingestion. Accepts one JSON object or a list and returns ingestion counters. |
+| `GET /api/live` | API process liveness. Returns `200` with `{"status":"ALIVE"}` independently of PostgreSQL. |
+| `GET /api/ready` | Database readiness. Returns `200` with `HEALTHY` and `CONNECTED`, or `503` with `DEGRADED` and `DISCONNECTED`. The `engine` field is the generic `PostgreSQL` label. |
+| `GET /api/health` | Compatibility alias for `/api/ready`, including its HTTP status. |
+| `POST /api/webhooks/wazuh` | HMAC-authenticated alert ingestion. Accepts one JSON object or a list and returns ingestion counters. The `X-Request-ID` response header identifies the delivery in backend logs. |
 
 | Method and path relative to `/api/v1` | Behavior |
 | --- | --- |

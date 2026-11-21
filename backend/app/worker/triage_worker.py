@@ -15,6 +15,7 @@ import queue
 import random
 import threading
 import time
+from datetime import datetime, timezone
 from typing import Any, Optional
 from uuid import UUID
 
@@ -29,7 +30,7 @@ from app.services.triage_store import STATUS_PENDING_REVIEW, load_triage_inputs,
 from app.worker.jobs import TriageQueue, triage_queue
 from app.worker.worker_settings import WorkerSettings, get_worker_settings
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("sentrax.ops.triage")
 
 # The default sync pool holds 15 connections; more threads than this would wait for one.
 MAX_WORKERS = 12
@@ -37,7 +38,7 @@ SWEEP_BATCH = 500
 
 _SQL_ATTEMPT = text("SELECT status, triage_generation FROM alerts WHERE id = CAST(:id AS uuid)")
 _SQL_PENDING = text(
-    "SELECT id FROM alerts WHERE status = 'PENDING_REVIEW' ORDER BY ingested_at LIMIT :n"
+    "SELECT id, ingested_at FROM alerts WHERE status = 'PENDING_REVIEW' ORDER BY ingested_at LIMIT :n"
 )
 _SQL_MANUAL = text("""
     UPDATE alerts SET status = 'NEEDS_MANUAL_TRIAGE', updated_at = now()
@@ -77,9 +78,12 @@ def _to_manual_triage(alert_id: UUID, generation: int, session_factory: Any) -> 
         with session_factory() as s:
             moved = s.execute(_SQL_MANUAL, {"id": str(alert_id), "generation": generation}).rowcount
             s.commit()
+        if moved:
+            logger.warning("triage_fallback alert_id=%s generation=%d reason=worker_error", alert_id, generation)
         return STATUS_NEEDS_MANUAL_TRIAGE if moved else None
-    except Exception:
-        logger.exception("Could not move alert %s to manual triage", alert_id)
+    except Exception as exc:
+        logger.error("triage_fallback_write_failed alert_id=%s generation=%d error_type=%s",
+                     alert_id, generation, type(exc).__name__)
         return None
 
 
@@ -107,9 +111,12 @@ def process_alert(
         with session_factory() as s:
             status = persist_outcome(s, alert_id, outcome, expected_generation=generation)
             s.commit()
+        if status == STATUS_NEEDS_MANUAL_TRIAGE:
+            logger.warning("triage_fallback alert_id=%s generation=%d provider=%s retries=%d reason=%s",
+                           alert_id, generation, outcome.provider_name, outcome.call.retry_count, outcome.error)
         return status
-    except Exception:
-        logger.exception("Triage failed for alert %s", alert_id)
+    except Exception as exc:
+        logger.error("triage_failed alert_id=%s generation=%s error_type=%s", alert_id, generation, type(exc).__name__)
         if generation is not None:
             return _to_manual_triage(alert_id, generation, session_factory)
         return None
@@ -180,8 +187,8 @@ class TriageWorker:
                 try:
                     process_alert(alert_id, self._adapter,
                                   session_factory=self._session_factory, **self._lookups)
-                except Exception:
-                    logger.exception("Unexpected error while triaging %s", alert_id)
+                except Exception as exc:
+                    logger.error("triage_loop_failed alert_id=%s error_type=%s", alert_id, type(exc).__name__)
                 finally:
                     with self._lock:
                         self._inflight.discard(alert_id)
@@ -197,12 +204,19 @@ class TriageWorker:
         """Recover a batch of pending alerts even while new jobs are arriving."""
         try:
             with self._session_factory() as s:
-                ids = [r[0] for r in s.execute(_SQL_PENDING, {"n": SWEEP_BATCH}).all()]
-        except Exception:
-            logger.exception("Sweep failed")
+                pending = s.execute(_SQL_PENDING, {"n": SWEEP_BATCH}).all()
+        except Exception as exc:
+            logger.warning("triage_sweep_failed error_type=%s", type(exc).__name__)
+            return 0
+        if not pending:
             return 0
         with self._lock:
-            return sum(self._queue.enqueue(alert_id) for alert_id in ids if alert_id not in self._inflight)
+            enqueued = sum(self._queue.enqueue(row.id) for row in pending if row.id not in self._inflight)
+        oldest = pending[0]
+        age_seconds = max(0, int((datetime.now(timezone.utc) - oldest.ingested_at).total_seconds()))
+        logger.info("triage_sweep oldest_alert_id=%s oldest_ingested_age_seconds=%d scanned=%d enqueued=%d",
+                    oldest.id, age_seconds, len(pending), enqueued)
+        return enqueued
 
 
 _worker: Optional[TriageWorker] = None

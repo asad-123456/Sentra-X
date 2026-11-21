@@ -67,7 +67,7 @@ class Poller:
             try:
                 self.run_once()
             except Exception as exc:  # never kill the loop
-                log.warning("wazuh poll failed, will retry next cycle: %s", exc)
+                log.warning("wazuh_poll_failed error_type=%s", type(exc).__name__)
             self._stop.wait(self.interval)
 
     def start(self) -> None:

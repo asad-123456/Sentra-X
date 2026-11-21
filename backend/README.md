@@ -53,8 +53,8 @@ LLM_PROVIDER=mock
 docker compose --env-file .env.lab -p sentrax-lab up --build --wait
 docker compose --env-file .env.lab -p sentrax-lab ps
 docker compose --env-file .env.lab -p sentrax-lab exec -T db psql -U sentrax -d sentrax -Atc 'SELECT version_num FROM alembic_version'
-curl.exe -fsS http://127.0.0.1:18001/api/health
-curl.exe -fskS https://127.0.0.1:18444/api/health
+curl.exe -fsS http://127.0.0.1:18001/api/ready
+curl.exe -fskS https://127.0.0.1:18444/api/ready
 ```
 
 Expect three healthy services, Alembic `0006_triage_generation`, and matching `HEALTHY` responses. Open `https://127.0.0.1:18444` and sign in as a seeded user. Nginx serves the browser and proxies `/api/` on the same origin. It uses a self-signed lab certificate. The direct API on port `18001` also serves `/docs`.
@@ -81,7 +81,15 @@ The Wazuh [source guide](../docs/wazuh_alert_source.md) covers configuration, th
 
 In live mode, open **Admin & Benchmark → System Configuration** to see the running worker, its provider and model, and the effective ingestion and guardrail settings. Change the backend environment to update runtime settings. Recreate the backend container in Compose, or restart a backend running directly on the host, then select **Refresh settings**.
 
-For a smoke test, start with an empty or newly populated disposable database and the mock provider. Ingest a fresh qualifying alert and verify `AWAITING_ANALYST`, an evidence pack, and an assessment. To test restart recovery, ingest another fresh alert with the worker disabled, then enable it and restart the API. The pending alert should reach the same state.
+### Readiness and recovery
+
+Use `GET /api/live` to check that the API responds. Use `GET /api/ready` to check database readiness. Both Docker application probes use readiness, including the one through Nginx. A reachable API with an unavailable database returns `200` from liveness and `503` from readiness. `/api/health` remains a compatibility alias for readiness. The response contains fixed status values. Check the authenticated runtime settings for worker state and the backend logs for inference failures.
+
+Use one API process and keep PostgreSQL storage when restarting the backend. The worker queue lives in memory. After restart, the startup sweep reads committed `PENDING_REVIEW` alerts from PostgreSQL and enqueues them. An interrupted model call can run again, and generation checks keep stale results from overwriting newer work. A Docker container marked unhealthy requires operator attention. Restarting the backend while the database is down does not restore database connectivity.
+
+In an isolated lab with the mock provider, ingest a fresh qualifying alert and verify an assessment and evidence pack. Capture an existing decision audit, then restart only the backend while a second committed alert is pending. Verify that the second alert becomes reviewable and the first alert's decision and evidence remain unchanged. To exercise degraded readiness, stop and start only the disposable database. Compare liveness and readiness at the direct API and through Nginx.
+
+In the backend logs, look up `webhook_rejected` by the response's `X-Request-ID`. For `triage_fallback`, use the alert UUID and generation to identify the attempt. A `triage_sweep` entry reports the oldest pending alert's age since ingestion, the number scanned in that batch, and the number newly enqueued. The age includes elapsed time since original ingestion for a retried alert. These fields help distinguish rejected intake, pending work, and fallback to manual review.
 
 ### Ollama triage
 
