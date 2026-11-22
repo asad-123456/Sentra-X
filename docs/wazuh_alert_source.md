@@ -2,7 +2,7 @@
 
 | Mode | Configuration |
 | --- | --- |
-| `webhook` | Preferred for the lab described below. Configure the manager sender and `WAZUH_WEBHOOK_SECRET` in `backend/.env`. |
+| `webhook` | Preferred for the lab described below. Configure the manager sender and `WAZUH_WEBHOOK_SECRET` in the selected backend environment file. |
 | `poll` | Use a reachable HTTPS Wazuh Indexer with `WAZUH_INDEXER_URL`, credentials, and TLS verification appropriate to the deployment. The poller reads `wazuh-alerts-*`. |
 | `replay` | Default development mode. Run the JSONL replay CLI with a fixture and target a disposable database. |
 
@@ -42,6 +42,37 @@ Add the integration inside an existing `<ossec_config>` block on the manager. Fo
 Back up `ossec.conf`, check it with `/var/ossec/bin/wazuh-integratord -t`, and restart the manager after a successful check. Keep the receiving lab on mock inference. Follow the selected event ID from Wazuh to PostgreSQL and the analyst queue, then resend the same source event to verify deduplication. [Wazuh configuration validation](https://documentation.wazuh.com/current/user-manual/reference/ossec-conf/verifying-configuration.html)
 
 To broaden forwarding, remove the `<rule_id>` line and any other alert filters from this integration, then validate and restart the manager. Wazuh forwards the alerts it generates. Sentra-X separately applies `WAZUH_MIN_LEVEL`, which defaults to 4. Set it to 0 in the receiving backend environment and recreate the backend to accept forwarded alerts at any valid level. Check ingestion counts and pending backlog when widening the feed. [Wazuh integration filters](https://documentation.wazuh.com/current/user-manual/reference/ossec-conf/integration.html)
+
+### Start the existing Windows receiver
+
+These commands apply to the configured VirtualBox workstation. For a new installation, use the [VirtualBox lab setup](#virtualbox-lab). Preserve the existing ignored `.env.m06-live` and use the `sentrax-m06-live` Compose project to reuse the database and its named accounts.
+
+1. Start Docker Desktop. In Windows PowerShell, from the repository root, start the dedicated local Ollama server and then the stack.
+
+   ```powershell
+   docker info --format '{{.ServerVersion}}'
+   & .\.agents\codex\private\start-sentrax-receiver-ollama.ps1
+   docker compose --env-file .env.m06-live -p sentrax-m06-live config --quiet
+   docker compose --env-file .env.m06-live -p sentrax-m06-live up -d --build --wait
+   curl.exe -fskS https://127.0.0.1:18451/api/ready
+   ```
+
+2. Open [Sentra-X on port 18451](https://127.0.0.1:18451/queue), sign in with a named account, and verify **SIEM: webhook** and **LLM: ollama**. The UI serves saved alerts even before the separate Wazuh gateway is started.
+3. Check the expected Windows address with `Get-NetIPAddress -IPAddress 192.168.100.57`. The existing gateway listens on that address, accepts the configured Wazuh manager, and forwards to the Compose backend on port `18007`. If the address has changed, review the gateway configuration, certificate, and manager webhook URL together before starting live delivery.
+
+   ```powershell
+   $gateway = (Resolve-Path '.env.m06-local\nginx-1.30.7').Path
+   if (-not (Get-NetTCPConnection -LocalAddress 192.168.100.57 -LocalPort 18450 -State Listen -ErrorAction SilentlyContinue)) {
+       & "$gateway\nginx.exe" -p "$gateway/" -c conf/sentrax-m06-live.conf -t
+       if ($LASTEXITCODE -ne 0) { throw 'Wazuh gateway configuration check failed.' }
+       Start-Process -FilePath "$gateway\nginx.exe" -WorkingDirectory $gateway `
+           -ArgumentList @('-p', "$gateway/", '-c', 'conf/sentrax-m06-live.conf') -WindowStyle Hidden
+       Start-Sleep -Seconds 1
+   }
+   Get-NetTCPConnection -LocalAddress 192.168.100.57 -LocalPort 18450 -State Listen
+   ```
+
+4. Start the manager and monitored VM in VirtualBox if needed. Inside each respective VM, check `sudo systemctl is-active wazuh-manager` and `sudo systemctl is-active wazuh-agent`. The acceptance setup forwards rule `533`. Confirm a fresh alert in the queue by its Wazuh ID and verify the saved model and evidence.
 
 ## Replay
 

@@ -31,25 +31,18 @@ Swagger is at `http://localhost:8000/docs`. The demo users are `analyst_01`, `te
 
 ## Loopback Compose lab
 
-Use Docker Desktop with Linux containers. From the repository root, create the ignored `.env.lab` once. Keep it with the lab volume because it contains the database password. The lab uses mock inference, requires sign-in, and seeds demo users when the database is empty. For a browser-only fixture demo, use the [frontend offline setup](../frontend/README.md#offline-mode).
+Use Docker Desktop with Linux containers. From the repository root, create the ignored `.env.lab` once from the [Compose template](../.env.compose.example). Keep it with the lab volume because it contains the database password. The lab uses mock inference, requires sign-in, and seeds demo users when the database is empty. For the existing live receiver, follow the [Windows startup guide](../docs/wazuh_alert_source.md#start-the-existing-windows-receiver). For a browser-only fixture demo, use the [frontend offline setup](../frontend/README.md#offline-mode).
 
 ```powershell
 if (-not (Test-Path -LiteralPath .env.lab)) {
-    @"
-SENTRAX_BACKEND_ENV_FILE=.env.lab
-SENTRAX_DB_PORT=15433
-SENTRAX_API_PORT=18001
-SENTRAX_HTTPS_PORT=18444
-POSTGRES_PASSWORD=$([guid]::NewGuid().ToString('N'))
-SECRET_KEY=$([guid]::NewGuid().ToString('N'))$([guid]::NewGuid().ToString('N'))
-WAZUH_WEBHOOK_SECRET=$([guid]::NewGuid().ToString('N'))$([guid]::NewGuid().ToString('N'))
-WAZUH_INGEST_MODE=webhook
-DEMO_MODE=false
-SEED_DEMO_DATA=true
-LLM_PROVIDER=mock
-"@ | Set-Content -LiteralPath .env.lab -Encoding ascii
+    $profile = Get-Content -Raw -LiteralPath .env.compose.example
+    $profile = $profile.Replace('REPLACE_DATABASE_PASSWORD', [guid]::NewGuid().ToString('N'))
+    $profile = $profile.Replace('REPLACE_JWT_SECRET', ([guid]::NewGuid().ToString('N') + [guid]::NewGuid().ToString('N')))
+    $profile = $profile.Replace('REPLACE_WEBHOOK_SECRET', ([guid]::NewGuid().ToString('N') + [guid]::NewGuid().ToString('N')))
+    Set-Content -LiteralPath .env.lab -Value $profile -Encoding ascii
 }
 
+docker compose --env-file .env.lab -p sentrax-lab config --quiet
 docker compose --env-file .env.lab -p sentrax-lab up --build --wait
 docker compose --env-file .env.lab -p sentrax-lab ps
 docker compose --env-file .env.lab -p sentrax-lab exec -T db psql -U sentrax -d sentrax -Atc 'SELECT version_num FROM alembic_version'
@@ -65,7 +58,7 @@ The Compose images use Python 3.12, PostgreSQL 16, Node 22 for the frontend buil
 
 ### Named accounts
 
-For a fresh named-account lab, set `SEED_DEMO_DATA=false` and keep `DEMO_MODE=false` in the lab environment file before its first boot. Use a fresh Compose project and volume if you want to run it alongside the seeded lab. Give the second project unused host ports in its environment file.
+For a fresh named-account lab, prepare a separate file from the same Compose template. Set `SEED_DEMO_DATA=false` and keep `DEMO_MODE=false` before its first boot. Set `SENTRAX_BACKEND_ENV_FILE` to that file's repository-relative path and choose unused host ports. Use a fresh Compose project and volume so the seeded lab remains available.
 
 After the services are healthy, run the bootstrap from an interactive terminal, using your lab's environment file and project name. For example:
 

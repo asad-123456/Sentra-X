@@ -14,7 +14,7 @@ flowchart LR
     A --> T
 ```
 
-The API starts the triage worker and recovers pending alerts after a restart. Gemini, Claude, and a deterministic mock adapter share the same triage pipeline. Feedback exemplars can inform later assessments. The evaluation runner compares baseline and guarded triage on synthetic inputs. Mock reports are labeled dry runs, and provider errors can make a run inconclusive.
+The API starts the triage worker and recovers pending alerts after a restart. Local Ollama, Gemini, Claude, and the deterministic mock share the same triage pipeline. Feedback exemplars can inform later assessments. The evaluation runner compares baseline and guarded triage on synthetic inputs. Mock reports are labeled dry runs, and provider errors can make a run inconclusive.
 
 ## Start here
 
@@ -23,8 +23,20 @@ The API starts the triage worker and recovers pending alerts after a restart. Ge
 | Explore the UI without services | [Frontend setup](frontend/README.md). Leave `VITE_API_BASE_URL` unset for the browser demo. |
 | Run the API and UI locally | [Backend setup and test isolation](backend/README.md), then [frontend live mode](frontend/README.md#live-mode). |
 | Run the Compose lab | Follow the [loopback Compose setup](backend/README.md#loopback-compose-lab) for the live browser API, mock inference, and a disposable database. |
+| Start the existing Windows Wazuh and Ollama receiver | Follow the [Windows receiver startup](docs/wazuh_alert_source.md#start-the-existing-windows-receiver). |
 | Connect Wazuh | [Wazuh sources and replay](docs/wazuh_alert_source.md). |
 | Understand API and persistence | [Backend and REST reference](docs/backend_architecture_and_api_documentation.md), [database reference](docs/database_documentation.md), and the local API's `/docs` and `/openapi.json`. |
+
+## Configuration files
+
+| Mode | Template or local profile |
+| --- | --- |
+| Docker Compose mock lab | Create `.env.lab` from [`.env.compose.example`](.env.compose.example). |
+| Existing Windows Wazuh receiver | Reuse its local `.env.m06-live` and existing Compose project. The [Windows receiver guide](docs/wazuh_alert_source.md#start-the-existing-windows-receiver) covers startup and network checks. |
+| Backend running directly on the host | Copy [backend/.env.example](backend/.env.example) to `backend/.env`. |
+| Frontend running in Vite | Use [frontend/.env.example](frontend/.env.example) for a backend connection. Leave `VITE_API_BASE_URL` unset for browser-only fixtures. |
+
+Tests that write to PostgreSQL use explicitly disposable databases. See the [test database setup](backend/README.md#testing-and-maintenance).
 
 ## Repository map
 
