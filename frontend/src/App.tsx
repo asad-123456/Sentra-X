@@ -64,7 +64,7 @@ export default function App(): React.JSX.Element {
               <Route
                 path="/admin/evaluation"
                 element={
-                  <ProtectedRoute allowedRoles={['Admin']}>
+                  <ProtectedRoute allowedRoles={[None]}>
                     <EvaluationRunnerView />
                   </ProtectedRoute>
                 }
